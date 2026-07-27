@@ -36,7 +36,7 @@ PUBLIC_KEY  = os.path.join(KEYS_DIR, "repo.pub")
 SIGN_NAME   = "custompf"
 
 PKG_NAME     = "pfSense-pkg-flexiwan"
-PKG_VERSION  = "1.0.5"
+PKG_VERSION  = "1.0.6"
 PKG_ORIGIN   = "net/pfSense-pkg-flexiwan"
 PKG_COMMENT  = "pfSense FlexiWAN SD-WAN Integration"
 PKG_DESC     = ("Integrates pfSense with the FlexiWAN SD-WAN central management platform "
@@ -110,11 +110,18 @@ with tarfile.open(pkg_path, "w:xz") as tar:
     add_str("+DEINSTALL",        PKG_DEINSTALL_SCRIPT, mode=0o755)
 
     for rel, rp, tar_name in sorted(file_entries, key=lambda x: x[2]):
-        i = tarfile.TarInfo(name=tar_name)
+        # CRITICAL: tar member names must be ABSOLUTE paths (with leading slash)
+        # pkg_create.c line 218: snprintf(fpath, ..., root, relocation, file->path)
+        # file->path is absolute: /usr/local/bin/flexiwand
+        # pkg_add.c line 955: pkg_absolutepath(archive_entry_pathname(ae), ..., fromroot=true)
+        # Since path already starts with /, pkg_absolutepath returns it unchanged
+        # So tar member /usr/local/bin/flexiwand -> lookup /usr/local/bin/flexiwand -> MATCH
+        abs_tar_name = rel  # rel is already absolute: /usr/local/bin/flexiwand
+        i = tarfile.TarInfo(name=abs_tar_name)
         i.size=os.path.getsize(rp); i.mtime=int(time.time())
         i.mode = 0o755 if (rp.endswith(".sh") or rp.endswith("flexiwand")) else 0o644
         with open(rp,"rb") as f: tar.addfile(i, f)
-        print(f"  + {tar_name}")
+        print(f"  + {abs_tar_name}")
 
 pkg_data   = open(pkg_path,"rb").read()
 pkg_sha256 = hashlib.sha256(pkg_data).hexdigest()
