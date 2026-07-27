@@ -1,17 +1,10 @@
-<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0"?>
 <pfsensepkgs>
-    <package>
-        <name>flexiwan</name>
-        <descr><![CDATA[FlexiWAN SD-WAN Integration. Connects pfSense to the FlexiWAN central management platform (flexiManage) for centralized SD-WAN orchestration, policy management, and health monitoring.]]></descr>
-        <website>https://flexiwan.com</website>
-        <version>1.0.0</version>
-        <configurationfile>flexiwan.xml</configurationfile>
-        <depends_on_package_base_url></depends_on_package_base_url>
-        <depends_on_package_pbi></depends_on_package_pbi>
-        <build_port_path>/usr/ports/net/pfSense-pkg-flexiwan</build_port_path>
-        <build_pbi>
-            <ports_before></ports_before>
-            <ports_after></ports_after>
-        </build_pbi>
-    </package>
+	<package>
+		<name>flexiwan</name>
+		<descr><![CDATA[FlexiWAN SD-WAN Integration for pfSense. Connects pfSense to the FlexiWAN central management platform (flexiManage) for centralized SD-WAN orchestration, device registration, policy management, and health monitoring.]]></descr>
+		<pkginfolink>https://github.com/SomeoneCares/custompf</pkginfolink>
+		<version>1.0.2</version>
+		<configurationfile>flexiwan.xml</configurationfile>
+	</package>
 </pfsensepkgs>

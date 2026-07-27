@@ -24,7 +24,7 @@ PUBLIC_KEY  = os.path.join(KEYS_DIR, "repo.pub")
 SIGN_NAME   = "custompf"
 
 PKG_NAME     = "pfSense-pkg-flexiwan"
-PKG_VERSION  = "1.0.1"   # bumped to force reinstall
+PKG_VERSION     = "1.0.2"   # bumped to force reinstall
 PKG_ORIGIN   = "net/pfSense-pkg-flexiwan"
 PKG_COMMENT  = "pfSense FlexiWAN SD-WAN Integration"
 PKG_DESC     = ("Integrates pfSense with the FlexiWAN SD-WAN central management platform "
