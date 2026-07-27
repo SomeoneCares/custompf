@@ -24,7 +24,7 @@ PUBLIC_KEY  = os.path.join(KEYS_DIR, "repo.pub")
 SIGN_NAME   = "custompf"
 
 PKG_NAME     = "pfSense-pkg-flexiwan"
-PKG_VERSION     = "1.0.2"   # bumped to force reinstall
+PKG_VERSION     = "1.0.3"   # bumped to force reinstall
 PKG_ORIGIN   = "net/pfSense-pkg-flexiwan"
 PKG_COMMENT  = "pfSense FlexiWAN SD-WAN Integration"
 PKG_DESC     = ("Integrates pfSense with the FlexiWAN SD-WAN central management platform "
@@ -114,7 +114,12 @@ with tarfile.open(pkg_path, "w:xz") as tar:
     add_str("+DEINSTALL", PKG_DEINSTALL_SCRIPT, mode=0o755)
 
     for rel, rp in sorted(file_entries):
-        i = tarfile.TarInfo(name=rel.lstrip("/"))
+        # Strip /usr/local/ prefix — pkg stores paths relative to PREFIX
+        # e.g. /usr/local/pkg/flexiwan.xml -> pkg/flexiwan.xml
+        member_name = rel.lstrip("/")
+        if member_name.startswith("usr/local/"):
+            member_name = member_name[len("usr/local/"):]
+        i = tarfile.TarInfo(name=member_name)
         i.size=os.path.getsize(rp); i.mtime=int(time.time())
         i.mode = 0o755 if (rp.endswith(".sh") or rp.endswith("flexiwand")) else 0o644
         with open(rp,"rb") as f: tar.addfile(i, f)
