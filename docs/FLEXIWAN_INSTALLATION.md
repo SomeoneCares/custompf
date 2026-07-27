@@ -23,7 +23,7 @@ This is the easiest method for ongoing updates.
 4. Click **Add** to add a new repository
 5. Enter the following details:
    - **Name**: `custompf`
-   - **URL**: `https://github.com/YOUR_USERNAME/custompf/releases/download/latest/`
+   - **URL**: `https://github.com/SomeoneCares/custompf/releases/download/latest/`
 6. Click **Save**
 
 #### Step 2: Install the Package
@@ -47,7 +47,7 @@ Use this method if you prefer to download and install manually.
 
 #### Step 1: Download the Package
 
-1. Visit the [Releases](https://github.com/YOUR_USERNAME/custompf/releases) page
+1. Visit the [Releases](https://github.com/SomeoneCares/custompf/releases) page
 2. Download the latest `pfSense-pkg-flexiwan-1.0.0.txz` file
 3. Save it to your computer
 
@@ -74,7 +74,7 @@ For advanced users who prefer command-line installation.
 ```bash
 ssh admin@your-pfsense-ip
 cd /tmp
-fetch https://github.com/YOUR_USERNAME/custompf/releases/download/latest/pfSense-pkg-flexiwan-1.0.0.txz
+fetch https://github.com/SomeoneCares/custompf/releases/download/latest/pfSense-pkg-flexiwan-1.0.0.txz
 ```
 
 #### Step 2: Install the Package

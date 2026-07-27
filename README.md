@@ -28,7 +28,7 @@ A production-ready pfSense plugin that integrates with the FlexiWAN SD-WAN centr
 2. Navigate to **System > Package Manager > Settings**
 3. In the **Repository List**, add a new repository:
    - **Name**: `custompf`
-   - **URL**: `https://github.com/YOUR_USERNAME/custompf/releases/download/latest/`
+   - **URL**: `https://github.com/SomeoneCares/custompf/releases/download/latest/`
 4. Click **Save**
 5. Navigate to **System > Package Manager > Available Packages**
 6. Search for "flexiwan"
@@ -36,7 +36,7 @@ A production-ready pfSense plugin that integrates with the FlexiWAN SD-WAN centr
 
 ### Method 2: Manual Installation from GitHub
 
-1. Download the latest release from the [Releases](https://github.com/YOUR_USERNAME/custompf/releases) page
+1. Download the latest release from the [Releases](https://github.com/SomeoneCares/custompf/releases) page
 2. Upload the `.txz` package file to your pfSense device
 3. Install via SSH:
    ```bash
@@ -47,7 +47,7 @@ A production-ready pfSense plugin that integrates with the FlexiWAN SD-WAN centr
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/custompf.git
+   git clone https://github.com/SomeoneCares/custompf.git
    cd custompf
    ```
 
