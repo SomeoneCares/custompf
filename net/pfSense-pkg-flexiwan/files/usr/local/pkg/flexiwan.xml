@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<packagegui>
+    <copyright><![CDATA[Copyright (c) 2024 Manus AI. All rights reserved.]]></copyright>
+    <name>flexiwan</name>
+    <title>FlexiWAN SD-WAN Integration</title>
+    <include_file>/usr/local/pkg/flexiwan.inc</include_file>
+    <aftersaveredirect>pkg_edit.php?xml=flexiwan.xml</aftersaveredirect>
+    
+    <menu>
+        <name>FlexiWAN</name>
+        <section>Services</section>
+        <configfile>flexiwan.xml</configfile>
+        <tooltiptext>Manage FlexiWAN SD-WAN integration and device registration</tooltiptext>
+        <url>/pkg_edit.php?xml=flexiwan.xml</url>
+    </menu>
+    
+    <tabs>
+        <tab>
+            <text>Settings</text>
+            <url>/pkg_edit.php?xml=flexiwan.xml</url>
+            <active/>
+        </tab>
+        <tab>
+            <text>Device Registration</text>
+            <url>/pkg_edit.php?xml=flexiwan_device.xml</url>
+        </tab>
+        <tab>
+            <text>Status</text>
+            <url>/flexiwan_status.php</url>
+        </tab>
+        <tab>
+            <text>Tunnels</text>
+            <url>/flexiwan_tunnels.php</url>
+        </tab>
+    </tabs>
+    
+    <service>
+        <name>flexiwan</name>
+        <rcfile>flexiwan.sh</rcfile>
+        <executable>flexiwand</executable>
+        <description>FlexiWAN SD-WAN Integration Daemon</description>
+    </service>
+    
+    <fields>
+        <field>
+            <fielddescr>Enable FlexiWAN Integration</fielddescr>
+            <fieldname>enabled</fieldname>
+            <type>checkbox</type>
+            <description>Enable the FlexiWAN SD-WAN integration plugin</description>
+        </field>
+        
+        <field>
+            <fielddescr>FlexiWAN Backend URL</fielddescr>
+            <fieldname>backend_url</fieldname>
+            <type>input</type>
+            <size>60</size>
+            <default>https://manage.flexiwan.com</default>
+            <description>URL of the FlexiWAN flexiManage backend (default: https://manage.flexiwan.com)</description>
+        </field>
+        
+        <field>
+            <fielddescr>API Access Key</fielddescr>
+            <fieldname>api_access_key</fieldname>
+            <type>password</type>
+            <description>Bearer token for FlexiWAN API authentication. Create this in FlexiWAN Account settings.</description>
+        </field>
+        
+        <field>
+            <fielddescr>Synchronization Interval</fielddescr>
+            <fieldname>sync_interval</fieldname>
+            <type>input</type>
+            <size>10</size>
+            <default>300</default>
+            <description>Configuration synchronization interval in seconds (default: 300 = 5 minutes)</description>
+        </field>
+        
+        <field>
+            <fielddescr>Health Report Interval</fielddescr>
+            <fieldname>health_report_interval</fieldname>
+            <type>input</type>
+            <size>10</size>
+            <default>60</default>
+            <description>Health metrics reporting interval in seconds (default: 60 = 1 minute)</description>
+        </field>
+        
+        <field>
+            <fielddescr>Enable Debug Logging</fielddescr>
+            <fieldname>debug_logging</fieldname>
+            <type>checkbox</type>
+            <description>Enable verbose debug logging to /var/log/flexiwan.log</description>
+        </field>
+    </fields>
+    
+    <custom_php_global_functions>
+        <![CDATA[
+        function flexiwan_validate_config($post, &$input_errors) {
+            // Validate backend URL
+            if (!empty($post['backend_url'])) {
+                if (!filter_var($post['backend_url'], FILTER_VALIDATE_URL)) {
+                    $input_errors[] = 'Invalid backend URL format';
+                }
+            }
+            
+            // Validate sync interval
+            if (!empty($post['sync_interval'])) {
+                if (!is_numeric($post['sync_interval']) || $post['sync_interval'] < 10) {
+                    $input_errors[] = 'Sync interval must be a number >= 10 seconds';
+                }
+            }
+            
+            // Validate health report interval
+            if (!empty($post['health_report_interval'])) {
+                if (!is_numeric($post['health_report_interval']) || $post['health_report_interval'] < 10) {
+                    $input_errors[] = 'Health report interval must be a number >= 10 seconds';
+                }
+            }
+            
+            return $input_errors;
+        }
+        ]]>
+    </custom_php_global_functions>
+    
+    <custom_php_validation_command>
+        flexiwan_validate_config($_POST, $input_errors);
+    </custom_php_validation_command>
+    
+    <custom_php_install_command>
+        <![CDATA[
+        // Create log file
+        @touch('/var/log/flexiwan.log');
+        @chmod('/var/log/flexiwan.log', 0644);
+        
+        // Create cache directory
+        @mkdir('/var/cache/flexiwan', 0755, true);
+        
+        // Initialize configuration if not present
+        require_once('/usr/local/pkg/flexiwan.inc');
+        if (!isset($config['installedpackages']['flexiwan'])) {
+            $config['installedpackages']['flexiwan'] = array(
+                'enabled' => false,
+                'backend_url' => 'https://manage.flexiwan.com',
+                'sync_interval' => 300,
+                'health_report_interval' => 60,
+                'debug_logging' => false
+            );
+            write_config('FlexiWAN configuration initialized');
+        }
+        ]]>
+    </custom_php_install_command>
+    
+    <custom_php_resync_config_command>
+        <![CDATA[
+        require_once('/usr/local/pkg/flexiwan.inc');
+        if (isset($config['installedpackages']['flexiwan']) && 
+            $config['installedpackages']['flexiwan']['enabled']) {
+            // Trigger configuration sync
+            flexiwan_sync_config();
+        }
+        ]]>
+    </custom_php_resync_config_command>
+    
+    <custom_php_deinstall_command>
+        <![CDATA[
+        // Stop the service
+        mwexec('/usr/local/etc/rc.d/flexiwan.sh stop', true);
+        
+        // Remove log file
+        @unlink('/var/log/flexiwan.log');
+        
+        // Remove cache directory
+        @exec('rm -rf /var/cache/flexiwan');
+        
+        // Clear configuration
+        if (isset($config['installedpackages']['flexiwan'])) {
+            unset($config['installedpackages']['flexiwan']);
+            write_config('FlexiWAN configuration removed');
+        }
+        ]]>
+    </custom_php_deinstall_command>
+    
+    <start_command>
+        <![CDATA[
+        if (isset($config['installedpackages']['flexiwan']) && 
+            $config['installedpackages']['flexiwan']['enabled']) {
+            mwexec('/usr/local/etc/rc.d/flexiwan.sh start');
+        }
+        ]]>
+    </start_command>
+    
+    <custom_php_service_status_command>
+        <![CDATA[
+        $status = array();
+        if (isset($config['installedpackages']['flexiwan']) && 
+            $config['installedpackages']['flexiwan']['enabled']) {
+            $status['enabled'] = true;
+            $status['running'] = is_process_running('flexiwand');
+        } else {
+            $status['enabled'] = false;
+            $status['running'] = false;
+        }
+        return $status;
+        ]]>
+    </custom_php_service_status_command>
+</packagegui>

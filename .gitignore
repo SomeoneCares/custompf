@@ -1,0 +1,29 @@
+# FreeBSD ports build artifacts
+work/
+distfiles/
+*.txz
+*.tbz
+*.tgz
+
+# Build artifacts
+*.o
+*.a
+*.so
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# System files
+.env
+.env.local
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp

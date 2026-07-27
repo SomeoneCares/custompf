@@ -1,0 +1,17 @@
+%%PORTNAME%%/share/pfSense-pkg-flexiwan/info.xml
+local/pkg/flexiwan.xml
+local/pkg/flexiwan_device.xml
+local/pkg/flexiwan.inc
+local/pkg/flexiwan_device.inc
+local/pkg/flexiwan/src/FlexiWANApiClient.php
+local/pkg/flexiwan/src/FlexiWANConfigManager.php
+local/pkg/flexiwan/src/FlexiWANDeviceRegistration.php
+local/pkg/flexiwan/src/FlexiWANSyncEngine.php
+local/pkg/flexiwan/src/FlexiWANHealthMonitor.php
+local/www/flexiwan_status.php
+local/bin/flexiwand
+local/etc/rc.d/flexiwan.sh
+@dir local/pkg/flexiwan/src
+@dir local/pkg/flexiwan
+@dir %%PORTNAME%%/share/pfSense-pkg-flexiwan
+@dir %%PORTNAME%%/share
