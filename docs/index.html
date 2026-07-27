@@ -55,7 +55,7 @@ fetch -o /usr/local/etc/pkg/custompf.pub \
 cat > /usr/local/etc/pkg/repos/custompf.conf << 'EOF'
 custompf: {
   url: "https://SomeoneCares.github.io/custompf/",
-  signature_type: "PUBKEY",
+  signature_type: "fingerprints",
   pubkey: "/usr/local/etc/pkg/custompf.pub",
   enabled: yes,
   priority: 10
@@ -88,7 +88,7 @@ pkg install pfSense-pkg-flexiwan
 <h2>&#128274; Security</h2>
 <p>All packages are signed with an RSA-4096 key. The public key is available at
 <a href="https://raw.githubusercontent.com/SomeoneCares/custompf/master/keys/custompf.pub">keys/custompf.pub</a>.
-When you configure pfSense to use <code>signature_type: "PUBKEY"</code>, pkg will verify every package before installation.</p>
+When you configure pfSense to use <code>signature_type: "fingerprints"</code>, pkg will verify every package before installation.</p>
 
 <h2>&#128279; Links</h2>
 <ul>

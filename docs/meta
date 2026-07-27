@@ -7,5 +7,5 @@
   "filesite_archive": "filesite",
   "digests": "digests.txz",
   "digests_archive": "digests",
-  "signature_type": "PUBKEY"
+  "signature_type": "FINGERPRINTS"
 }
