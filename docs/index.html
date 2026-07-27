@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom pfSense Packages Repository</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #333; }
+        h1 { color: #1a1a2e; border-bottom: 3px solid #e74c3c; padding-bottom: 10px; }
+        h2 { color: #16213e; margin-top: 30px; }
+        code, pre { background: #f4f4f4; border: 1px solid #ddd; border-radius: 4px; padding: 2px 6px; font-family: 'Courier New', monospace; }
+        pre { padding: 15px; overflow-x: auto; }
+        .pkg-card { border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin: 15px 0; background: #fafafa; }
+        .pkg-card h3 { margin: 0 0 10px 0; color: #e74c3c; }
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .badge-green { background: #27ae60; color: white; }
+        .badge-blue  { background: #2980b9; color: white; }
+        .step { background: #eaf4fb; border-left: 4px solid #2980b9; padding: 10px 15px; margin: 10px 0; }
+        a { color: #2980b9; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+        th { background: #16213e; color: white; }
+        tr:nth-child(even) { background: #f9f9f9; }
+    </style>
+</head>
+<body>
+
+<h1>&#128230; Custom pfSense Packages Repository</h1>
+<p>A <strong>FreeBSD pkg-compatible</strong> repository hosting custom pfSense packages. Add this as a custom repository in pfSense and install packages directly from the Package Manager.</p>
+
+<h2>&#128279; Repository URL</h2>
+<pre>https://SomeoneCares.github.io/custompf/</pre>
+
+<h2>&#128230; Available Packages</h2>
+
+<div class="pkg-card">
+    <h3>pfSense-pkg-flexiwan</h3>
+    <span class="badge badge-green">v1.0.0</span>&nbsp;
+    <span class="badge badge-blue">net</span>
+    <p>Integrates pfSense with the FlexiWAN SD-WAN central management platform (flexiManage). Provides device registration, configuration synchronization, health monitoring, and a native pfSense web UI — without replacing any existing pfSense functionality.</p>
+    <p><strong>Install:</strong> <code>pkg install pfSense-pkg-flexiwan</code></p>
+    <p><a href="All/pfSense-pkg-flexiwan-1.0.0.pkg">&#11015; Download pfSense-pkg-flexiwan-1.0.0.pkg</a></p>
+</div>
+
+<h2>&#128295; How to Add This Repository to pfSense</h2>
+
+<h3>Method 1: SSH (Recommended)</h3>
+<p>SSH into your pfSense device and run:</p>
+<pre>
+# Step 1: Download the repository public key
+fetch -o /usr/local/etc/pkg/custompf.pub \
+  https://raw.githubusercontent.com/SomeoneCares/custompf/master/keys/custompf.pub
+
+# Step 2: Create the repository configuration
+cat > /usr/local/etc/pkg/repos/custompf.conf << 'EOF'
+custompf: {
+  url: "https://SomeoneCares.github.io/custompf/",
+  signature_type: "PUBKEY",
+  pubkey: "/usr/local/etc/pkg/custompf.pub",
+  enabled: yes,
+  priority: 10
+}
+EOF
+
+# Step 3: Update package catalog
+pkg update
+
+# Step 4: Install the FlexiWAN package
+pkg install pfSense-pkg-flexiwan
+</pre>
+
+<h3>Method 2: pfSense Shell (GUI)</h3>
+<div class="step">1. Log in to pfSense WebGUI</div>
+<div class="step">2. Navigate to <strong>Diagnostics &gt; Command Prompt</strong></div>
+<div class="step">3. Paste and run the commands from Method 1 above</div>
+<div class="step">4. Navigate to <strong>System &gt; Package Manager &gt; Available Packages</strong> and search for <strong>flexiwan</strong></div>
+
+<h2>&#128196; Repository Files</h2>
+<table>
+    <tr><th>File</th><th>Description</th></tr>
+    <tr><td><a href="packagesite.pkg">packagesite.pkg</a></td><td>Compressed package catalog (required by pkg)</td></tr>
+    <tr><td><a href="packagesite.yaml">packagesite.yaml</a></td><td>Human-readable package catalog</td></tr>
+    <tr><td><a href="meta.conf">meta.conf</a></td><td>Repository metadata and signing info</td></tr>
+    <tr><td><a href="digests.txz">digests.txz</a></td><td>Package checksums</td></tr>
+    <tr><td><a href="All/pfSense-pkg-flexiwan-1.0.0.pkg">All/pfSense-pkg-flexiwan-1.0.0.pkg</a></td><td>FlexiWAN package archive</td></tr>
+</table>
+
+<h2>&#128274; Security</h2>
+<p>All packages are signed with an RSA-4096 key. The public key is available at
+<a href="https://raw.githubusercontent.com/SomeoneCares/custompf/master/keys/custompf.pub">keys/custompf.pub</a>.
+When you configure pfSense to use <code>signature_type: "PUBKEY"</code>, pkg will verify every package before installation.</p>
+
+<h2>&#128279; Links</h2>
+<ul>
+    <li><a href="https://github.com/SomeoneCares/custompf">GitHub Repository (source code)</a></li>
+    <li><a href="https://docs.flexiwan.com">FlexiWAN Documentation</a></li>
+    <li><a href="https://docs.netgate.com/pfsense/en/latest/">pfSense Documentation</a></li>
+</ul>
+
+<hr>
+<p style="color:#888; font-size:13px;">Custom pfSense Packages &mdash; MIT License</p>
+</body>
+</html>

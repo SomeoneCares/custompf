@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<packagegui>
+    <copyright><![CDATA[Copyright (c) 2024 Manus AI. All rights reserved.]]></copyright>
+    <name>flexiwan_device</name>
+    <title>FlexiWAN - Device Registration</title>
+    <include_file>/usr/local/pkg/flexiwan_device.inc</include_file>
+    <aftersaveredirect>pkg_edit.php?xml=flexiwan_device.xml</aftersaveredirect>
+    
+    <tabs>
+        <tab>
+            <text>Settings</text>
+            <url>/pkg_edit.php?xml=flexiwan.xml</url>
+        </tab>
+        <tab>
+            <text>Device Registration</text>
+            <url>/pkg_edit.php?xml=flexiwan_device.xml</url>
+            <active/>
+        </tab>
+        <tab>
+            <text>Status</text>
+            <url>/flexiwan_status.php</url>
+        </tab>
+        <tab>
+            <text>Tunnels</text>
+            <url>/flexiwan_tunnels.php</url>
+        </tab>
+    </tabs>
+    
+    <fields>
+        <field>
+            <fielddescr>Registration Status</fielddescr>
+            <fieldname>registration_status</fieldname>
+            <type>info</type>
+            <description>Current device registration status with FlexiWAN backend</description>
+        </field>
+        
+        <field>
+            <fielddescr>Device ID</fielddescr>
+            <fieldname>device_id</fieldname>
+            <type>info</type>
+            <description>Unique device identifier assigned by FlexiWAN</description>
+        </field>
+        
+        <field>
+            <fielddescr>Device Name</fielddescr>
+            <fieldname>device_name</fieldname>
+            <type>input</type>
+            <size>40</size>
+            <description>Name for this device in FlexiWAN (default: hostname)</description>
+        </field>
+        
+        <field>
+            <fielddescr>Device Description</fielddescr>
+            <fieldname>device_description</fieldname>
+            <type>textarea</type>
+            <rows>3</rows>
+            <cols>60</cols>
+            <description>Optional description for this device</description>
+        </field>
+        
+        <field>
+            <fielddescr>Organization Token</fielddescr>
+            <fieldname>organization_token</fieldname>
+            <type>textarea</type>
+            <rows>3</rows>
+            <cols>60</cols>
+            <description><![CDATA[
+            Paste the organization token from FlexiWAN here. You can get this token from:
+            <br/>1. Log in to FlexiWAN (https://manage.flexiwan.com)
+            <br/>2. Navigate to Inventory > Tokens
+            <br/>3. Click "New Token" to create a new token
+            <br/>4. Copy the token and paste it here
+            <br/>5. Click "Register Device" below
+            ]]></description>
+        </field>
+        
+        <field>
+            <fielddescr>Register Device</fielddescr>
+            <fieldname>register_device</fieldname>
+            <type>button</type>
+            <description>Click to register this device with FlexiWAN backend</description>
+        </field>
+        
+        <field>
+            <fielddescr>Unregister Device</fielddescr>
+            <fieldname>unregister_device</fieldname>
+            <type>button</type>
+            <description>Click to unregister this device from FlexiWAN backend</description>
+            <placeonbottom/>
+        </field>
+        
+        <field>
+            <fielddescr>Check Status</fielddescr>
+            <fieldname>check_status</fieldname>
+            <type>button</type>
+            <description>Click to check the current registration status with FlexiWAN</description>
+            <placeonbottom/>
+        </field>
+    </fields>
+    
+    <custom_php_command_before_form>
+        <![CDATA[
+        require_once('/usr/local/pkg/flexiwan_device.inc');
+        flexiwan_device_before_form();
+        ]]>
+    </custom_php_command_before_form>
+    
+    <custom_php_after_form_command>
+        <![CDATA[
+        require_once('/usr/local/pkg/flexiwan_device.inc');
+        flexiwan_device_after_form();
+        ]]>
+    </custom_php_after_form_command>
+</packagegui>

@@ -1,123 +1,130 @@
 # Custom pfSense Packages Repository
 
-A custom FreeBSD ports repository containing additional pfSense packages for enhanced functionality.
+A **FreeBSD `pkg`-compatible** custom repository for pfSense, hosted on GitHub Pages. Add the repository URL to pfSense and install packages directly from the Package Manager — exactly like official packages.
 
-## Packages Included
+**Repository URL:** `https://SomeoneCares.github.io/custompf/`
 
-### FlexiWAN SD-WAN Integration (v1.0.0)
+---
 
-A production-ready pfSense plugin that integrates with the FlexiWAN SD-WAN central management platform (flexiManage).
+## Available Packages
 
-**Features:**
-- Device registration with FlexiWAN backend
-- Automatic configuration synchronization
-- Real-time health monitoring and metrics reporting
-- Native pfSense web UI integration
-- Background daemon for periodic operations
+| Package | Version | Category | Description |
+|---------|---------|----------|-------------|
+| `pfSense-pkg-flexiwan` | 1.0.0 | net | FlexiWAN SD-WAN Integration — registers pfSense with FlexiWAN backend, syncs tunnels and policies, reports health metrics |
 
-**Documentation:**
-- [Installation Guide](docs/FLEXIWAN_INSTALLATION.md)
-- [Configuration Guide](docs/FLEXIWAN_CONFIGURATION.md)
-- [Troubleshooting Guide](docs/FLEXIWAN_TROUBLESHOOTING.md)
+---
 
-## Installation
+## Adding This Repository to pfSense
 
-### Method 1: Add Custom Repository to pfSense (Recommended)
+### Step 1 — Download the Repository Public Key
 
-1. Log in to pfSense WebGUI
-2. Navigate to **System > Package Manager > Settings**
-3. In the **Repository List**, add a new repository:
-   - **Name**: `custompf`
-   - **URL**: `https://github.com/SomeoneCares/custompf/releases/download/latest/`
-4. Click **Save**
-5. Navigate to **System > Package Manager > Available Packages**
-6. Search for "flexiwan"
-7. Click **Install**
+SSH into your pfSense device and run:
 
-### Method 2: Manual Installation from GitHub
+```bash
+fetch -o /usr/local/etc/pkg/custompf.pub \
+  https://raw.githubusercontent.com/SomeoneCares/custompf/master/keys/custompf.pub
+```
 
-1. Download the latest release from the [Releases](https://github.com/SomeoneCares/custompf/releases) page
-2. Upload the `.txz` package file to your pfSense device
-3. Install via SSH:
-   ```bash
-   pkg add /path/to/pfSense-pkg-flexiwan-1.0.0.txz
-   ```
+### Step 2 — Create the Repository Configuration File
 
-### Method 3: Build from Source
+```bash
+cat > /usr/local/etc/pkg/repos/custompf.conf << 'EOF'
+custompf: {
+  url: "https://SomeoneCares.github.io/custompf/",
+  signature_type: "PUBKEY",
+  pubkey: "/usr/local/etc/pkg/custompf.pub",
+  enabled: yes,
+  priority: 10
+}
+EOF
+```
 
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/SomeoneCares/custompf.git
-   cd custompf
-   ```
+### Step 3 — Update the Package Catalog
 
-2. Build the package:
-   ```bash
-   cd net/pfSense-pkg-flexiwan
-   make package
-   ```
+```bash
+pkg update
+```
 
-3. Install the built package:
-   ```bash
-   pkg add work/pkg/pfSense-pkg-flexiwan-1.0.0.txz
-   ```
+You should see output like:
+```
+Updating custompf repository catalogue...
+custompf repository is up to date.
+```
+
+### Step 4 — Install a Package
+
+```bash
+pkg install pfSense-pkg-flexiwan
+```
+
+Or via the pfSense WebGUI: **System > Package Manager > Available Packages**, search for `flexiwan`, click **Install**.
+
+---
 
 ## Repository Structure
 
 ```
 custompf/
-├── net/
-│   └── pfSense-pkg-flexiwan/          # FlexiWAN SD-WAN Integration
-│       ├── Makefile                   # FreeBSD port Makefile
-│       ├── pkg-plist                  # Package file list
-│       ├── files/                     # Package files
-│       │   └── usr/local/
-│       │       ├── pkg/               # pfSense package files
-│       │       ├── www/               # Web UI pages
-│       │       ├── bin/               # Daemon scripts
-│       │       └── etc/rc.d/          # Service scripts
-│       └── pkg-install                # Installation script
-├── docs/                              # Documentation
-├── README.md                          # This file
-└── LICENSE                            # MIT License
+├── docs/                          ← GitHub Pages root (the actual pkg repository)
+│   ├── index.html                 ← Repository landing page
+│   ├── packagesite.pkg            ← Compressed package catalog (used by pkg update)
+│   ├── packagesite.yaml           ← Human-readable package catalog
+│   ├── meta.conf                  ← Repository metadata and signing info
+│   ├── meta                       ← Same as meta.conf (legacy compatibility)
+│   ├── digests.txz                ← Package SHA256 checksums
+│   ├── signature                  ← RSA signature of packagesite.pkg
+│   └── All/
+│       └── pfSense-pkg-flexiwan-1.0.0.pkg   ← Package archive
+│
+├── sources/                       ← Port source code (for building packages)
+│   └── net/
+│       └── pfSense-pkg-flexiwan/  ← FlexiWAN package source
+│
+├── keys/
+│   └── custompf.pub               ← Repository public key (for pkg signature verification)
+│
+├── scripts/
+│   └── build_pkg.py               ← Package build automation script
+│
+└── README.md
 ```
 
-## Building Packages
+---
 
-To build all packages in this repository:
+## Adding a New Package to This Repository
 
-```bash
-# Build a specific package
-cd net/pfSense-pkg-flexiwan
-make package
+To add another package to the repository:
 
-# The built package will be in work/pkg/
-```
+1. **Add source files** under `sources/net/pfSense-pkg-<name>/` following the FreeBSD port structure.
 
-## Contributing
+2. **Update `scripts/build_pkg.py`** — add a new package entry to the `PACKAGES` list (the script supports building multiple packages in one run).
 
-To add new packages to this repository:
+3. **Run the build script** on a FreeBSD system (or Linux with Python 3):
+   ```bash
+   python3 scripts/build_pkg.py
+   ```
 
-1. Create a new directory under `net/` for your package
-2. Follow the FreeBSD ports structure
-3. Include a Makefile, pkg-plist, and files/
-4. Submit a pull request
+4. **Copy the output** from `packages/` to `docs/` and commit:
+   ```bash
+   cp packages/All/<new-package>.pkg docs/All/
+   # Re-run the build to regenerate packagesite.pkg with all packages
+   cp packages/packagesite.pkg docs/
+   cp packages/packagesite.yaml docs/
+   git add docs/ && git commit -m "Add <new-package> v1.0.0" && git push
+   ```
 
-## Support
+5. **GitHub Pages** automatically serves the updated `docs/` folder — no server management needed.
 
-For issues with packages in this repository:
+---
 
-- **FlexiWAN Issues**: Check the [FlexiWAN Documentation](https://docs.flexiwan.com)
-- **General pfSense Issues**: Visit the [pfSense Forum](https://forum.netgate.com)
+## Security
+
+All packages are signed with an RSA-4096 key pair. The **public key** is committed to this repository at `keys/custompf.pub`. The **private key** is never committed and must be kept secure by the repository maintainer.
+
+When pfSense is configured with `signature_type: "PUBKEY"`, the `pkg` tool verifies the RSA signature of `packagesite.pkg` before trusting the catalog, and verifies SHA256 checksums of each package before installation.
+
+---
 
 ## License
 
-All packages in this repository are licensed under the MIT License. See [LICENSE](LICENSE) for details.
-
-## Repository Maintainer
-
-Maintained by: Your Name (your-email@example.com)
-
-## Disclaimer
-
-These packages are provided as-is. Use at your own risk. Always test in a non-production environment first.
+MIT License — see [LICENSE](LICENSE) for details.
