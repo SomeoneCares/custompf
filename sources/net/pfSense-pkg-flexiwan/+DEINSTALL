@@ -1,0 +1,2 @@
+#!/bin/sh
+/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-flexiwan ${2}

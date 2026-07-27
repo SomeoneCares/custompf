@@ -1,31 +1,16 @@
 #!/usr/bin/env python3
 """
-Build a correctly signed FreeBSD pkg repository — based on actual pkg source code.
+Build a correctly signed FreeBSD pkg repository for pfSense.
 
-From pkg_repo.c analysis:
+Key insight from pfSense package source code:
+  - Every pfSense package MUST include a pkg-install script (stored as +INSTALL
+    in the .pkg tar) that calls /etc/rc.packages POST-INSTALL
+  - /etc/rc.packages reads info.xml and registers the package in pfSense config.xml
+  - Without this, the package files are installed but pfSense never adds the menu entry
 
-For SIG_FINGERPRINT mode, pkg_repo_meta_extract_signature_fingerprints() scans
-the packagesite.pkg tar for entries ending in:
-  - ".sig"  → raw RSA signature bytes (type=0)
-  - ".pub"  → PEM public key (type=1)
-
-The name used (without extension) must match between .sig and .pub files.
-e.g.: "custompf.sig" and "custompf.pub"
-
-The signature is computed as:
-  RSA_sign( SHA256( SHA256_hex(packagesite.yaml) ) )
-  i.e. sign the SHA256 of the hex-encoded SHA256 of the yaml data.
-
-From pkgsign_ossl.c:
-  sha256 = pkg_checksum_fd(fd, PKG_HASH_TYPE_SHA256_HEX)   # hex string of sha256
-  hash   = pkg_checksum_data(sha256, len, PKG_HASH_TYPE_SHA256_RAW)  # sha256 of that hex
-  EVP_PKEY_verify(ctx, sig, siglen, hash, 32)  # verify RSA with SHA256 padding
-
-So we need: openssl pkeyutl -sign with -pkeyopt digest:sha256 on the double-hash bytes.
-
-For SIG_PUBKEY mode, pkg looks for a tar entry named exactly "signature" containing
-the raw RSA signature bytes (no SIGNATURE/CERT/END wrapping — that was wrong).
-The public key is loaded from the repo config's "pubkey" file path on disk.
+Signing: FINGERPRINTS mode
+  - packagesite.pkg tar contains: packagesite.yaml, <name>.sig, <name>.pub
+  - Signature = RSA PKCS#1v1.5 over SHA256(SHA256_hex(packagesite.yaml))
 """
 
 import os, sys, json, hashlib, tarfile, io, time, subprocess
@@ -36,10 +21,10 @@ ALL_DIR     = os.path.join(OUTPUT_DIR, "All")
 KEYS_DIR    = "/home/ubuntu/pkg-build/keys"
 PRIVATE_KEY = os.path.join(KEYS_DIR, "repo.key")
 PUBLIC_KEY  = os.path.join(KEYS_DIR, "repo.pub")
-SIGN_NAME   = "custompf"   # base name for .sig and .pub files in the tar
+SIGN_NAME   = "custompf"
 
 PKG_NAME     = "pfSense-pkg-flexiwan"
-PKG_VERSION  = "1.0.0"
+PKG_VERSION  = "1.0.1"   # bumped to force reinstall
 PKG_ORIGIN   = "net/pfSense-pkg-flexiwan"
 PKG_COMMENT  = "pfSense FlexiWAN SD-WAN Integration"
 PKG_DESC     = ("Integrates pfSense with the FlexiWAN SD-WAN central management platform "
@@ -53,13 +38,31 @@ PKG_ARCH     = "freebsd:*:*"
 PKG_CATEGORIES = ["net"]
 PKG_LICENSE  = ["MIT"]
 
+# pkg-install script content (called by pkg after installation)
+PKG_INSTALL_SCRIPT = """\
+#!/bin/sh
+if [ "${2}" != "POST-INSTALL" ]; then
+\texit 0
+fi
+${PKG_ROOTDIR}/usr/local/bin/php -f ${PKG_ROOTDIR}/etc/rc.packages pfSense-pkg-flexiwan ${2}
+"""
+
+# pkg-deinstall script content
+PKG_DEINSTALL_SCRIPT = """\
+#!/bin/sh
+/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-flexiwan ${2}
+"""
+
 os.makedirs(ALL_DIR, exist_ok=True)
 
-# ── Step 1: Collect files ──────────────────────────────────────────────────────
+# ── Step 1: Collect files (skip +INSTALL and +DEINSTALL from staging) ──────────
 print("Collecting files...")
 files_meta, file_entries = {}, []
 for root, dirs, files in os.walk(STAGING_DIR):
     for fname in sorted(files):
+        # Skip the +INSTALL/+DEINSTALL we wrote to staging — they go as special members
+        if fname in ("+INSTALL", "+DEINSTALL"):
+            continue
         rp = os.path.join(root, fname)
         rel = rp[len(STAGING_DIR):]
         data = open(rp, "rb").read()
@@ -87,6 +90,11 @@ def manifest(with_files=True, with_desc=True):
         L.append('files: {')
         for p, m in sorted(files_meta.items()): L.append(f'  "{p}": "{m["sum"]}"')
         L += ['}', 'directories: {}']
+    # Scripts section — tells pkg to run these after install/deinstall
+    L.append('scripts: {')
+    L.append('  post-install: "#!/bin/sh\\nif [ \\"${2}\\" != \\"POST-INSTALL\\" ]; then\\n\\texit 0\\nfi\\n${PKG_ROOTDIR}/usr/local/bin/php -f ${PKG_ROOTDIR}/etc/rc.packages pfSense-pkg-flexiwan ${2}\\n"')
+    L.append('  pre-deinstall: "#!/bin/sh\\n/usr/local/bin/php -f /etc/rc.packages pfSense-pkg-flexiwan ${2}\\n"')
+    L.append('}')
     return "\n".join(L) + "\n"
 
 pkg_file = f"{PKG_NAME}-{PKG_VERSION}.pkg"
@@ -94,12 +102,17 @@ pkg_path = os.path.join(ALL_DIR, pkg_file)
 print(f"\nBuilding {pkg_file}...")
 
 with tarfile.open(pkg_path, "w:xz") as tar:
-    def add_str(name, content):
+    def add_str(name, content, mode=0o644):
         b = content.encode()
-        i = tarfile.TarInfo(name=name); i.size=len(b); i.mtime=int(time.time()); i.mode=0o644
+        i = tarfile.TarInfo(name=name); i.size=len(b); i.mtime=int(time.time()); i.mode=mode
         tar.addfile(i, io.BytesIO(b))
+
     add_str("+MANIFEST",         manifest(True,  True))
     add_str("+COMPACT_MANIFEST", manifest(False, False))
+    # Add install/deinstall scripts as executable members
+    add_str("+INSTALL",   PKG_INSTALL_SCRIPT,   mode=0o755)
+    add_str("+DEINSTALL", PKG_DEINSTALL_SCRIPT, mode=0o755)
+
     for rel, rp in sorted(file_entries):
         i = tarfile.TarInfo(name=rel.lstrip("/"))
         i.size=os.path.getsize(rp); i.mtime=int(time.time())
@@ -127,116 +140,62 @@ yaml_bytes = yaml_str.encode()
 with open(os.path.join(OUTPUT_DIR, "packagesite.yaml"), "wb") as f: f.write(yaml_bytes)
 print(f"\npackagesite.yaml  {len(yaml_bytes)} bytes")
 
-# ── Step 4: Compute the double-hash ───────────────────────────────────────────
-# pkg_checksum_fd(fd, SHA256_HEX)  → hex string of sha256 of file
-# pkg_checksum_data(hex, len, SHA256_RAW)  → sha256 of that hex string
-hex_hash    = hashlib.sha256(yaml_bytes).hexdigest()   # 64-char hex
-double_hash = hashlib.sha256(hex_hash.encode()).digest() # 32 bytes
-print(f"hex_hash    = {hex_hash}")
-print(f"double_hash = {double_hash.hex()}")
-
-# ── Step 5: Sign the double-hash with RSA PKCS#1 v1.5 + SHA-256 ──────────────
-# EVP_PKEY_CTX_set_signature_md(ctx, EVP_sha256()) + EVP_PKEY_verify
-# means the signature is over the 32-byte double_hash with SHA-256 DigestInfo wrapper.
-# openssl pkeyutl -sign -pkeyopt digest:sha256 signs a pre-hashed value with PKCS1 padding.
+# ── Step 4: Double-hash and sign ──────────────────────────────────────────────
+hex_hash    = hashlib.sha256(yaml_bytes).hexdigest()
+double_hash = hashlib.sha256(hex_hash.encode()).digest()
 
 dh_file  = os.path.join(KEYS_DIR, "double_hash.bin")
 sig_file = os.path.join(KEYS_DIR, f"{SIGN_NAME}.sig")
-
 with open(dh_file, "wb") as f: f.write(double_hash)
 
 result = subprocess.run([
-    "openssl", "pkeyutl",
-    "-sign",
-    "-inkey", PRIVATE_KEY,
-    "-in",    dh_file,
-    "-out",   sig_file,
-    "-pkeyopt", "digest:sha256",
+    "openssl", "pkeyutl", "-sign", "-inkey", PRIVATE_KEY,
+    "-in", dh_file, "-out", sig_file, "-pkeyopt", "digest:sha256",
 ], capture_output=True)
-
 if result.returncode != 0:
-    print("pkeyutl failed:", result.stderr.decode())
-    sys.exit(1)
+    print("pkeyutl failed:", result.stderr.decode()); sys.exit(1)
 
 sig_bytes = open(sig_file, "rb").read()
-print(f"\nRSA signature: {len(sig_bytes)} bytes  → {sig_file}")
+pub_pem   = open(PUBLIC_KEY, "rb").read()
+print(f"RSA signature: {len(sig_bytes)} bytes")
 
-# ── Step 6: Read public key PEM ───────────────────────────────────────────────
-pub_pem = open(PUBLIC_KEY, "rb").read()
-pub_dest = os.path.join(KEYS_DIR, f"{SIGN_NAME}.pub")
-with open(pub_dest, "wb") as f: f.write(pub_pem)
-
-# ── Step 7: Build packagesite.pkg ─────────────────────────────────────────────
-# For FINGERPRINTS: tar must contain <name>.sig and <name>.pub
-# For PUBKEY: tar must contain a file named exactly "signature" with raw sig bytes
-#
-# We build ONE packagesite.pkg that works for FINGERPRINTS mode:
-# Contains: packagesite.yaml, custompf.sig, custompf.pub
-
+# ── Step 5: Build packagesite.pkg ─────────────────────────────────────────────
 ps_pkg_path = os.path.join(OUTPUT_DIR, "packagesite.pkg")
 with tarfile.open(ps_pkg_path, "w:xz") as tar:
     def add_bytes(name, data):
         i = tarfile.TarInfo(name=name); i.size=len(data); i.mtime=int(time.time()); i.mode=0o644
         tar.addfile(i, io.BytesIO(data))
-    add_bytes("packagesite.yaml",       yaml_bytes)
-    add_bytes(f"{SIGN_NAME}.sig",       sig_bytes)   # raw RSA signature
-    add_bytes(f"{SIGN_NAME}.pub",       pub_pem)     # PEM public key
+    add_bytes("packagesite.yaml",   yaml_bytes)
+    add_bytes(f"{SIGN_NAME}.sig",   sig_bytes)
+    add_bytes(f"{SIGN_NAME}.pub",   pub_pem)
 
-ps_size = os.path.getsize(ps_pkg_path)
-print(f"packagesite.pkg: {ps_size} bytes")
+print(f"packagesite.pkg: {os.path.getsize(ps_pkg_path)} bytes")
 
-# Verify contents
-print("\nVerifying packagesite.pkg contents:")
-with tarfile.open(ps_pkg_path, "r:xz") as t:
-    for m in t.getmembers():
-        print(f"  {m.name}  ({m.size} bytes)")
-
-# ── Step 8: Compute fingerprint ───────────────────────────────────────────────
-# From pkg_repo.c: fingerprint = SHA256 of the PEM file as-is (not DER)
-fingerprint = hashlib.sha256(pub_pem).hexdigest()
-print(f"\nFingerprint (SHA256 of PEM file): {fingerprint}")
-
-fp_file = os.path.join(KEYS_DIR, "repo.fingerprint")
-with open(fp_file, "w") as f: f.write(fingerprint + "\n")
-
-# ── Step 9: meta.conf ─────────────────────────────────────────────────────────
-meta = """\
-{
-  "version": 2,
-  "packing_format": "txz",
-  "manifests": "packagesite.yaml",
-  "manifests_archive": "packagesite",
-  "filesite": "filesite.yaml",
-  "filesite_archive": "filesite",
-  "digests": "digests.txz",
-  "digests_archive": "digests",
-  "signature_type": "FINGERPRINTS"
-}
-"""
+# ── Step 6: meta.conf, digests ────────────────────────────────────────────────
+meta = '{\n  "version": 2,\n  "packing_format": "txz",\n  "manifests": "packagesite.yaml",\n  "manifests_archive": "packagesite",\n  "filesite": "filesite.yaml",\n  "filesite_archive": "filesite",\n  "digests": "digests.txz",\n  "digests_archive": "digests",\n  "signature_type": "FINGERPRINTS"\n}\n'
 for fn in ["meta.conf", "meta"]:
     with open(os.path.join(OUTPUT_DIR, fn), "w") as f: f.write(meta)
 
-# ── Step 10: digests.txz ──────────────────────────────────────────────────────
 dc = f"{pkg_file}:{pkg_sha256}\n".encode()
 with tarfile.open(os.path.join(OUTPUT_DIR,"digests.txz"),"w:xz") as tar:
     i = tarfile.TarInfo(name="digests.yaml"); i.size=len(dc); i.mtime=int(time.time()); i.mode=0o644
     tar.addfile(i, io.BytesIO(dc))
 
+fingerprint = hashlib.sha256(pub_pem).hexdigest()
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 print("\n" + "="*60)
-print("Build complete!")
+print(f"Build complete! Version: {PKG_VERSION}")
+print(f"Fingerprint: {fingerprint}")
 print("="*60)
-print(f"\nFingerprint: {fingerprint}")
 print(f"""
-On pfSense, run these commands:
+On pfSense, first remove the old version:
+  pkg delete pfSense-pkg-flexiwan
 
-mkdir -p /usr/local/etc/pkg/fingerprints/custompf/trusted
-mkdir -p /usr/local/etc/pkg/fingerprints/custompf/revoked
+Then reinstall:
+  pkg update
+  pkg install pfSense-pkg-flexiwan
 
-printf 'function: sha256\\nfingerprint: {fingerprint}\\n' > /usr/local/etc/pkg/fingerprints/custompf/trusted/custompf.fingerprint
-
-printf 'custompf: {{\\n  url: "https://SomeoneCares.github.io/custompf/",\\n  signature_type: "fingerprints",\\n  fingerprints: "/usr/local/etc/pkg/fingerprints/custompf",\\n  enabled: yes,\\n  priority: 10\\n}}\\n' > /usr/local/etc/pkg/repos/custompf.conf
-
-pkg update
-pkg install pfSense-pkg-flexiwan
+Then restart the web interface:
+  /etc/rc.restart_webgui
 """)
