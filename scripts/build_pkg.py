@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
 """
-Build a correctly signed FreeBSD pkg repository.
+Build a correctly signed FreeBSD pkg repository — based on actual pkg source code.
 
-pkg's signing protocol (from libpkg/pkgsign_ossl.c source):
-  1. pkg computes SHA256(packagesite.yaml) as a 64-char lowercase hex string
-  2. pkg signs SHA256(hex_string) — the DOUBLE HASH — using RSA PKCS#1 v1.5
-  3. The signature is embedded in packagesite.pkg as a tar member named 'signature'
-     in this exact text format:
-       SIGNATURE\n
-       <raw binary RSA signature bytes>\n
-       CERT\n
-       <PEM public key>\n
-       END\n
+From pkg_repo.c analysis:
 
-The fingerprint for the FINGERPRINTS method is SHA256 of the PEM file as-is.
+For SIG_FINGERPRINT mode, pkg_repo_meta_extract_signature_fingerprints() scans
+the packagesite.pkg tar for entries ending in:
+  - ".sig"  → raw RSA signature bytes (type=0)
+  - ".pub"  → PEM public key (type=1)
+
+The name used (without extension) must match between .sig and .pub files.
+e.g.: "custompf.sig" and "custompf.pub"
+
+The signature is computed as:
+  RSA_sign( SHA256( SHA256_hex(packagesite.yaml) ) )
+  i.e. sign the SHA256 of the hex-encoded SHA256 of the yaml data.
+
+From pkgsign_ossl.c:
+  sha256 = pkg_checksum_fd(fd, PKG_HASH_TYPE_SHA256_HEX)   # hex string of sha256
+  hash   = pkg_checksum_data(sha256, len, PKG_HASH_TYPE_SHA256_RAW)  # sha256 of that hex
+  EVP_PKEY_verify(ctx, sig, siglen, hash, 32)  # verify RSA with SHA256 padding
+
+So we need: openssl pkeyutl -sign with -pkeyopt digest:sha256 on the double-hash bytes.
+
+For SIG_PUBKEY mode, pkg looks for a tar entry named exactly "signature" containing
+the raw RSA signature bytes (no SIGNATURE/CERT/END wrapping — that was wrong).
+The public key is loaded from the repo config's "pubkey" file path on disk.
 """
 
 import os, sys, json, hashlib, tarfile, io, time, subprocess
@@ -24,6 +36,7 @@ ALL_DIR     = os.path.join(OUTPUT_DIR, "All")
 KEYS_DIR    = "/home/ubuntu/pkg-build/keys"
 PRIVATE_KEY = os.path.join(KEYS_DIR, "repo.key")
 PUBLIC_KEY  = os.path.join(KEYS_DIR, "repo.pub")
+SIGN_NAME   = "custompf"   # base name for .sig and .pub files in the tar
 
 PKG_NAME     = "pfSense-pkg-flexiwan"
 PKG_VERSION  = "1.0.0"
@@ -115,22 +128,23 @@ with open(os.path.join(OUTPUT_DIR, "packagesite.yaml"), "wb") as f: f.write(yaml
 print(f"\npackagesite.yaml  {len(yaml_bytes)} bytes")
 
 # ── Step 4: Compute the double-hash ───────────────────────────────────────────
-# pkg sends SHA256(yaml) as hex to signing command, then verifies SHA256(hex_string)
-hex_hash    = hashlib.sha256(yaml_bytes).hexdigest()          # 64-char hex string
-double_hash = hashlib.sha256(hex_hash.encode()).digest()      # 32 bytes
-
+# pkg_checksum_fd(fd, SHA256_HEX)  → hex string of sha256 of file
+# pkg_checksum_data(hex, len, SHA256_RAW)  → sha256 of that hex string
+hex_hash    = hashlib.sha256(yaml_bytes).hexdigest()   # 64-char hex
+double_hash = hashlib.sha256(hex_hash.encode()).digest() # 32 bytes
 print(f"hex_hash    = {hex_hash}")
 print(f"double_hash = {double_hash.hex()}")
 
-# ── Step 5: RSA sign the double-hash ──────────────────────────────────────────
-# We need to sign the double_hash bytes using RSA PKCS#1 v1.5 with SHA-256 DigestInfo.
-# openssl dgst -sha256 -sign signs SHA256(file), but we need to sign an ALREADY-hashed
-# value. We use openssl pkeyutl with -pkeyopt digest:sha256 to sign a pre-computed hash.
+# ── Step 5: Sign the double-hash with RSA PKCS#1 v1.5 + SHA-256 ──────────────
+# EVP_PKEY_CTX_set_signature_md(ctx, EVP_sha256()) + EVP_PKEY_verify
+# means the signature is over the 32-byte double_hash with SHA-256 DigestInfo wrapper.
+# openssl pkeyutl -sign -pkeyopt digest:sha256 signs a pre-hashed value with PKCS1 padding.
 
-dh_file = os.path.join(KEYS_DIR, "double_hash.bin")
+dh_file  = os.path.join(KEYS_DIR, "double_hash.bin")
+sig_file = os.path.join(KEYS_DIR, f"{SIGN_NAME}.sig")
+
 with open(dh_file, "wb") as f: f.write(double_hash)
 
-sig_file = os.path.join(KEYS_DIR, "repo_sig.bin")
 result = subprocess.run([
     "openssl", "pkeyutl",
     "-sign",
@@ -145,24 +159,28 @@ if result.returncode != 0:
     sys.exit(1)
 
 sig_bytes = open(sig_file, "rb").read()
-print(f"\nRSA signature: {len(sig_bytes)} bytes")
+print(f"\nRSA signature: {len(sig_bytes)} bytes  → {sig_file}")
 
 # ── Step 6: Read public key PEM ───────────────────────────────────────────────
 pub_pem = open(PUBLIC_KEY, "rb").read()
+pub_dest = os.path.join(KEYS_DIR, f"{SIGN_NAME}.pub")
+with open(pub_dest, "wb") as f: f.write(pub_pem)
 
-# ── Step 7: Build the signature blob in pkg's expected format ─────────────────
-# Format: SIGNATURE\n<binary sig>\nCERT\n<PEM>\nEND\n
-sig_blob = b"SIGNATURE\n" + sig_bytes + b"\nCERT\n" + pub_pem + b"END\n"
-print(f"Signature blob: {len(sig_blob)} bytes")
+# ── Step 7: Build packagesite.pkg ─────────────────────────────────────────────
+# For FINGERPRINTS: tar must contain <name>.sig and <name>.pub
+# For PUBKEY: tar must contain a file named exactly "signature" with raw sig bytes
+#
+# We build ONE packagesite.pkg that works for FINGERPRINTS mode:
+# Contains: packagesite.yaml, custompf.sig, custompf.pub
 
-# ── Step 8: Build packagesite.pkg with embedded signature ─────────────────────
 ps_pkg_path = os.path.join(OUTPUT_DIR, "packagesite.pkg")
 with tarfile.open(ps_pkg_path, "w:xz") as tar:
     def add_bytes(name, data):
         i = tarfile.TarInfo(name=name); i.size=len(data); i.mtime=int(time.time()); i.mode=0o644
         tar.addfile(i, io.BytesIO(data))
-    add_bytes("packagesite.yaml", yaml_bytes)
-    add_bytes("signature",        sig_blob)
+    add_bytes("packagesite.yaml",       yaml_bytes)
+    add_bytes(f"{SIGN_NAME}.sig",       sig_bytes)   # raw RSA signature
+    add_bytes(f"{SIGN_NAME}.pub",       pub_pem)     # PEM public key
 
 ps_size = os.path.getsize(ps_pkg_path)
 print(f"packagesite.pkg: {ps_size} bytes")
@@ -172,23 +190,16 @@ print("\nVerifying packagesite.pkg contents:")
 with tarfile.open(ps_pkg_path, "r:xz") as t:
     for m in t.getmembers():
         print(f"  {m.name}  ({m.size} bytes)")
-        if m.name == "signature":
-            d = t.extractfile(m).read()
-            print(f"    starts with: {d[:20]}")
-            assert d.startswith(b"SIGNATURE\n"), "Missing SIGNATURE header!"
-            assert b"CERT\n" in d, "Missing CERT section!"
-            assert d.strip().endswith(b"END"), "Missing END marker!"
-            print("    Format OK: SIGNATURE / CERT / END present")
 
-# ── Step 9: Compute fingerprint (SHA256 of PEM file) ─────────────────────────
+# ── Step 8: Compute fingerprint ───────────────────────────────────────────────
+# From pkg_repo.c: fingerprint = SHA256 of the PEM file as-is (not DER)
 fingerprint = hashlib.sha256(pub_pem).hexdigest()
-print(f"\nFingerprint (SHA256 of PEM): {fingerprint}")
+print(f"\nFingerprint (SHA256 of PEM file): {fingerprint}")
 
-# Save fingerprint file
-fp_path = os.path.join(KEYS_DIR, "repo.fingerprint")
-with open(fp_path, "w") as f: f.write(fingerprint + "\n")
+fp_file = os.path.join(KEYS_DIR, "repo.fingerprint")
+with open(fp_file, "w") as f: f.write(fingerprint + "\n")
 
-# ── Step 10: meta.conf — no signature_type needed when using fingerprints ─────
+# ── Step 9: meta.conf ─────────────────────────────────────────────────────────
 meta = """\
 {
   "version": 2,
@@ -205,7 +216,7 @@ meta = """\
 for fn in ["meta.conf", "meta"]:
     with open(os.path.join(OUTPUT_DIR, fn), "w") as f: f.write(meta)
 
-# ── Step 11: digests.txz ──────────────────────────────────────────────────────
+# ── Step 10: digests.txz ──────────────────────────────────────────────────────
 dc = f"{pkg_file}:{pkg_sha256}\n".encode()
 with tarfile.open(os.path.join(OUTPUT_DIR,"digests.txz"),"w:xz") as tar:
     i = tarfile.TarInfo(name="digests.yaml"); i.size=len(dc); i.mtime=int(time.time()); i.mode=0o644
@@ -216,22 +227,16 @@ print("\n" + "="*60)
 print("Build complete!")
 print("="*60)
 print(f"\nFingerprint: {fingerprint}")
-print(f"\nOn pfSense, run:")
 print(f"""
-# 1. Create fingerprint directories
+On pfSense, run these commands:
+
 mkdir -p /usr/local/etc/pkg/fingerprints/custompf/trusted
 mkdir -p /usr/local/etc/pkg/fingerprints/custompf/revoked
 
-# 2. Install the fingerprint
-cat > /usr/local/etc/pkg/fingerprints/custompf/trusted/custompf.fingerprint << 'EOF'
-function: sha256
-fingerprint: {fingerprint}
-EOF
+printf 'function: sha256\\nfingerprint: {fingerprint}\\n' > /usr/local/etc/pkg/fingerprints/custompf/trusted/custompf.fingerprint
 
-# 3. Create repo config
 printf 'custompf: {{\\n  url: "https://SomeoneCares.github.io/custompf/",\\n  signature_type: "fingerprints",\\n  fingerprints: "/usr/local/etc/pkg/fingerprints/custompf",\\n  enabled: yes,\\n  priority: 10\\n}}\\n' > /usr/local/etc/pkg/repos/custompf.conf
 
-# 4. Update and install
 pkg update
 pkg install pfSense-pkg-flexiwan
 """)
