@@ -24,7 +24,7 @@ PUBLIC_KEY  = os.path.join(KEYS_DIR, "repo.pub")
 SIGN_NAME   = "custompf"
 
 PKG_NAME     = "pfSense-pkg-flexiwan"
-PKG_VERSION     = "1.0.3"   # bumped to force reinstall
+PKG_VERSION     = "1.0.4"   # bumped to force reinstall
 PKG_ORIGIN   = "net/pfSense-pkg-flexiwan"
 PKG_COMMENT  = "pfSense FlexiWAN SD-WAN Integration"
 PKG_DESC     = ("Integrates pfSense with the FlexiWAN SD-WAN central management platform "
@@ -88,7 +88,14 @@ def manifest(with_files=True, with_desc=True):
     if with_desc: L.append(f'desc: "{PKG_DESC}"')
     if with_files:
         L.append('files: {')
-        for p, m in sorted(files_meta.items()): L.append(f'  "{p}": "{m["sum"]}"')
+        for p, m in sorted(files_meta.items()):
+            # Manifest paths must be absolute (prefix + relative path)
+            # e.g. /usr/local/ + pkg/flexiwan.xml = /usr/local/pkg/flexiwan.xml
+            rel = p.lstrip('/')
+            if rel.startswith('usr/local/'):
+                rel = rel[len('usr/local/'):]
+            abs_path = PKG_PREFIX + '/' + rel
+            L.append(f'  "{abs_path}": "{m["sum"]}"')
         L += ['}', 'directories: {}']
     # Scripts section — tells pkg to run these after install/deinstall
     L.append('scripts: {')
