@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <pfsensepkgs>
 	<package>
-		<name>pfSense-pkg-ovp</name>
+		<name>ovp</name>
 		<descr><![CDATA[OpenVPN Client Importer — upload a .ovpn file to automatically create a VPN client with certificates.]]></descr>
 		<pkginfolink>https://github.com/SomeoneCares/pFSense-OVP</pkginfolink>
-		<version>1.1.0</version>
+		<version>1.1.2</version>
 		<configurationfile>ovp_import.xml</configurationfile>
 	</package>
 </pfsensepkgs>
