@@ -36,7 +36,7 @@ PUBLIC_KEY  = os.path.join(KEYS_DIR, "repo.pub")
 SIGN_NAME   = "custompf"
 
 PKG_NAME     = "pfSense-pkg-flexiwan"
-PKG_VERSION  = "1.0.6"
+PKG_VERSION  = "1.0.7"
 PKG_ORIGIN   = "net/pfSense-pkg-flexiwan"
 PKG_COMMENT  = "pfSense FlexiWAN SD-WAN Integration"
 PKG_DESC     = ("Integrates pfSense with the FlexiWAN SD-WAN central management platform "
