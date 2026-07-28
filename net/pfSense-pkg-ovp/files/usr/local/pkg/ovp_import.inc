@@ -181,18 +181,17 @@ function ovp_generate_refid() {
  *                         or false if it is new.
  */
 function ovp_find_duplicate_ca($ca_pem) {
-	global $config;
-
 	$incoming_fp = ovp_pem_fingerprint($ca_pem);
 	if ($incoming_fp === '') {
 		return false;
 	}
 
-	if (!is_array($config['ca'])) {
+	$cas = config_get_path('ca', []);
+	if (!is_array($cas) || empty($cas)) {
 		return false;
 	}
 
-	foreach ($config['ca'] as $existing_ca) {
+	foreach ($cas as $existing_ca) {
 		if (empty($existing_ca['crt'])) {
 			continue;
 		}
@@ -217,18 +216,17 @@ function ovp_find_duplicate_ca($ca_pem) {
  *                           or false if it is new.
  */
 function ovp_find_duplicate_cert($cert_pem) {
-	global $config;
-
 	$incoming_fp = ovp_pem_fingerprint($cert_pem);
 	if ($incoming_fp === '') {
 		return false;
 	}
 
-	if (!is_array($config['cert'])) {
+	$certs = config_get_path('cert', []);
+	if (!is_array($certs) || empty($certs)) {
 		return false;
 	}
 
-	foreach ($config['cert'] as $existing_cert) {
+	foreach ($certs as $existing_cert) {
 		if (empty($existing_cert['crt'])) {
 			continue;
 		}
@@ -256,13 +254,12 @@ function ovp_find_duplicate_cert($cert_pem) {
  *                              or false if it is new.
  */
 function ovp_find_duplicate_client($server_addr, $server_port, $protocol) {
-	global $config;
-
 	if (empty($server_addr)) {
 		return false;
 	}
 
-	if (!is_array($config['openvpn']['openvpn-client'])) {
+	$clients = config_get_path('openvpn/openvpn-client', []);
+	if (!is_array($clients) || empty($clients)) {
 		return false;
 	}
 
@@ -270,7 +267,7 @@ function ovp_find_duplicate_client($server_addr, $server_port, $protocol) {
 	$port_norm  = trim($server_port);
 	$proto_norm = strtoupper(trim($protocol));
 
-	foreach ($config['openvpn']['openvpn-client'] as $existing) {
+	foreach ($clients as $existing) {
 		$e_addr  = strtolower(trim($existing['server_addr'] ?? ''));
 		$e_port  = trim($existing['server_port'] ?? '');
 		$e_proto = strtoupper(trim($existing['protocol'] ?? ''));
@@ -498,24 +495,18 @@ function ovp_map_tls_direction($directives) {
  * @return string|false  refid on success, false on failure
  */
 function ovp_import_ca($ca_pem, $descr = 'OVP Imported CA') {
-	global $config;
-
 	$ca_pem = ovp_clean_pem($ca_pem);
 	if (empty($ca_pem)) {
 		return false;
 	}
 
-	if (!is_array($config['ca'])) {
-		$config['ca'] = [];
-	}
-
 	$refid = ovp_generate_refid();
 
-	$config['ca'][] = [
+	config_set_path('ca/', [
 		'refid' => $refid,
 		'descr' => $descr,
 		'crt'   => base64_encode($ca_pem),
-	];
+	]);
 
 	return $refid;
 }
@@ -529,8 +520,6 @@ function ovp_import_ca($ca_pem, $descr = 'OVP Imported CA') {
  * @return string|false  refid on success, false on failure
  */
 function ovp_import_cert($cert_pem, $key_pem, $descr = 'OVP Imported Cert') {
-	global $config;
-
 	$cert_pem = ovp_clean_pem($cert_pem);
 	$key_pem  = ovp_clean_pem($key_pem);
 
@@ -538,18 +527,14 @@ function ovp_import_cert($cert_pem, $key_pem, $descr = 'OVP Imported Cert') {
 		return false;
 	}
 
-	if (!is_array($config['cert'])) {
-		$config['cert'] = [];
-	}
-
 	$refid = ovp_generate_refid();
 
-	$config['cert'][] = [
+	config_set_path('cert/', [
 		'refid' => $refid,
 		'descr' => $descr,
 		'crt'   => base64_encode($cert_pem),
 		'prv'   => base64_encode($key_pem),
-	];
+	]);
 
 	return $refid;
 }
@@ -757,8 +742,9 @@ function ovp_import_config($parsed, $options = []) {
 	if ($import_client) {
 		// Determine next available vpnid
 		$vpnid = 1;
-		if (!empty($config['openvpn']['openvpn-client'])) {
-			foreach ($config['openvpn']['openvpn-client'] as $existing) {
+		$existing_clients = config_get_path('openvpn/openvpn-client', []);
+		if (is_array($existing_clients)) {
+			foreach ($existing_clients as $existing) {
 				if (isset($existing['vpnid']) && (int)$existing['vpnid'] >= $vpnid) {
 					$vpnid = (int)$existing['vpnid'] + 1;
 				}
@@ -839,14 +825,7 @@ function ovp_import_config($parsed, $options = []) {
 			'custom_options'      => '',
 		];
 
-		if (!is_array($config['openvpn'])) {
-			$config['openvpn'] = [];
-		}
-		if (!is_array($config['openvpn']['openvpn-client'])) {
-			$config['openvpn']['openvpn-client'] = [];
-		}
-
-		$config['openvpn']['openvpn-client'][] = $new_client;
+		config_set_path('openvpn/openvpn-client/', $new_client);
 		$actions[] = "OpenVPN client #{$vpnid} ('{$description}') created.";
 	} else {
 		$actions[] = "OpenVPN client creation skipped — a matching client already exists.";
@@ -860,7 +839,8 @@ function ovp_import_config($parsed, $options = []) {
 	write_config("[OVP] Imported OpenVPN client '{$description}' from .ovpn file.");
 
 	if ($import_client && $vpnid !== null) {
-		$client_entry = end($config['openvpn']['openvpn-client']);
+		$all_clients = config_get_path('openvpn/openvpn-client', []);
+		$client_entry = end($all_clients);
 		openvpn_resync('client', $client_entry);
 		$actions[] = "OpenVPN client resynced and started.";
 	}
