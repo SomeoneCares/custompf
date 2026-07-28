@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
 build_custompf_repo.py
-Rebuild the full custompf repository catalog including pfSense-pkg-ovp.
+Rebuild the full custompf repository using PUBKEY signature mode.
 
-SIGNING SCHEME (must match pfSense pkg verifier exactly):
-  hex_hash    = sha256hex(packagesite.yaml bytes)
-  double_hash = sha256(hex_hash.encode()).digest()   <- raw bytes, NOT hex
-  signature   = openssl pkeyutl -sign -inkey repo.key -in double_hash.bin
-                                -pkeyopt digest:sha256
+PUBKEY mode (matches original working custompf repo):
+  - meta.conf embeds the full PEM public key inline
+  - packagesite.pkg contains: packagesite.yaml + custompf.sig
+  - Signature = RSA-SHA256 of sha256hex(yaml).encode()  via pkeyutl
+  - NO fingerprint files needed on pfSense clients
+  - Client .conf uses: signature_type: "PUBKEY", pubkey: "/path/to/repo.pub"
 
-TAR MEMBER PATHS (from existing working custompf build):
-  - Regular files stored WITHOUT leading slash: usr/local/pkg/foo.xml
-  - Manifest files: section uses WITH leading slash: /usr/local/pkg/foo.xml
+TAR MEMBER PATHS (custompf convention):
+  - Regular files WITHOUT leading slash: usr/local/pkg/foo.xml
+  - Manifest files: section WITH leading slash: /usr/local/pkg/foo.xml
 """
 
 import hashlib, io, json, os, subprocess, sys, tarfile, textwrap, time
@@ -37,11 +38,8 @@ OVP_DESC    = ("Upload a .ovpn file to automatically create a fully configured "
 OVP_WWW     = "https://github.com/SomeoneCares/pFSense-OVP"
 OVP_ARCH    = "freebsd:*:*"
 OVP_PREFIX  = "/usr/local"
-OVP_LICENSE = ["MIT"]
 OVP_MAINT   = "SomeoneCares"
 
-# Files to include in the OVP package
-# (source_path_relative_to_files_dir, absolute_dest_on_pfsense)
 OVP_FILES = [
     ("usr/local/pkg/ovp_import.xml",
      "/usr/local/pkg/ovp_import.xml"),
@@ -61,7 +59,6 @@ def sha256hex(data):
     return hashlib.sha256(data).hexdigest()
 
 def pkg_sum(data):
-    """pfSense pkg checksum format: '1$' + sha256hex"""
     return "1$" + sha256hex(data)
 
 def tar_add(tf, name, data, mode=0o644):
@@ -73,11 +70,10 @@ def tar_add(tf, name, data, mode=0o644):
 
 def sign_yaml(yaml_bytes):
     """
-    Exact double-hash signing scheme used by the working custompf build:
+    Sign using double-hash pkeyutl (matches original custompf build):
       hex_hash    = sha256hex(yaml_bytes)
-      double_hash = sha256(hex_hash.encode()).digest()   <- raw bytes
-      signature   = pkeyutl -sign -inkey repo.key -in double_hash.bin
-                            -pkeyopt digest:sha256
+      double_hash = sha256(hex_hash.encode()).digest()
+      signature   = pkeyutl -sign -inkey repo.key -pkeyopt digest:sha256
     """
     hex_hash    = sha256hex(yaml_bytes)
     double_hash = hashlib.sha256(hex_hash.encode()).digest()
@@ -100,14 +96,6 @@ def sign_yaml(yaml_bytes):
     with open(sig_file, "rb") as f:
         return f.read()
 
-def compute_fingerprint():
-    """SHA-256 of the DER-encoded public key bytes."""
-    der = subprocess.check_output(
-        ["openssl", "rsa", "-pubin", "-in", PUBLIC_KEY, "-outform", "DER"],
-        stderr=subprocess.DEVNULL
-    )
-    return sha256hex(der)
-
 # ── Build OVP .pkg ───────────────────────────────────────────────────────────
 
 def build_ovp_pkg():
@@ -124,7 +112,6 @@ def build_ovp_pkg():
         flatsize += len(data)
         print(f"[ovp]   {dest_abs}  ({len(data):,} B)")
 
-    # Build files section for manifest (absolute paths with leading slash)
     files_ucl = ""
     for dest_abs, data in file_entries:
         files_ucl += f'  "{dest_abs}": "{pkg_sum(data)}"\n'
@@ -166,22 +153,19 @@ def build_ovp_pkg():
 
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:xz") as tf:
-        # Order: +MANIFEST, +COMPACT_MANIFEST, +INSTALL, +DEINSTALL, then files
         tar_add(tf, "+MANIFEST",         manifest_str)
         tar_add(tf, "+COMPACT_MANIFEST", manifest_str)
         tar_add(tf, "+INSTALL",          install_script,   mode=0o755)
         tar_add(tf, "+DEINSTALL",        deinstall_script, mode=0o755)
-        # Regular files — tar member WITHOUT leading slash (matching custompf convention)
         for dest_abs, data in file_entries:
-            tar_name = dest_abs.lstrip("/")
-            tar_add(tf, tar_name, data)
+            tar_add(tf, dest_abs.lstrip("/"), data)
 
     pkg_bytes = buf.getvalue()
     pkg_path  = os.path.join(ALL_DIR, f"{OVP_NAME}-{OVP_VERSION}.pkg")
     with open(pkg_path, "wb") as f:
         f.write(pkg_bytes)
 
-    print(f"[ovp] Written: {pkg_path}  ({len(pkg_bytes):,} bytes, flatsize={flatsize:,})")
+    print(f"[ovp] Written: {pkg_path}  ({len(pkg_bytes):,} bytes)")
     return pkg_path, pkg_bytes, flatsize
 
 # ── Build repo catalog ───────────────────────────────────────────────────────
@@ -190,85 +174,57 @@ def build_catalog():
     print("[repo] Building packagesite.yaml ...")
 
     entries = []
-
     for fname in sorted(os.listdir(ALL_DIR)):
         if not fname.endswith(".pkg"):
             continue
-
         fpath = os.path.join(ALL_DIR, fname)
         with open(fpath, "rb") as f:
             pkg_data = f.read()
-
         pkg_size = len(pkg_data)
         pkg_sha  = sha256hex(pkg_data)
-
-        # Parse name/version from filename: <name>-<version>.pkg
         stem  = fname[:-4]
         parts = stem.rsplit("-", 1)
-        if len(parts) == 2 and parts[1][0].isdigit():
-            ename, eversion = parts
-        else:
-            ename, eversion = stem, "0.0.0"
-
-        if ename == OVP_NAME:
-            comment = OVP_COMMENT
-            desc    = OVP_DESC
-            www     = OVP_WWW
-        else:
-            comment = ename
-            desc    = ename
-            www     = "https://github.com/SomeoneCares/custompf"
-
-        # Use pkg_sha directly as sum (not "1$" prefix — packagesite uses raw sha256)
-        entry = {
-            "name":         ename,
-            "version":      eversion,
-            "origin":       f"net/{ename}",
-            "comment":      comment,
-            "arch":         "freebsd:*:*",
-            "www":          www,
-            "maintainer":   OVP_MAINT,
-            "prefix":       "/usr/local",
-            "licenselogic": "single",
-            "licenses":     ["MIT"],
-            "categories":   ["net"],
-            "flatsize":     pkg_size,
-            "desc":         desc,
-            "sum":          pkg_sha,
-            "repopath":     f"All/{fname}",
-            "pkgsize":      pkg_size,
-        }
-        entries.append(entry)
+        ename, eversion = (parts[0], parts[1]) if len(parts) == 2 and parts[1][0].isdigit() else (stem, "0.0.0")
+        comment = OVP_COMMENT if ename == OVP_NAME else ename
+        desc    = OVP_DESC    if ename == OVP_NAME else ename
+        www     = OVP_WWW     if ename == OVP_NAME else "https://github.com/SomeoneCares/custompf"
+        entries.append({
+            "name": ename, "version": eversion, "origin": f"net/{ename}",
+            "comment": comment, "arch": "freebsd:*:*", "www": www,
+            "maintainer": OVP_MAINT, "prefix": "/usr/local",
+            "licenselogic": "single", "licenses": ["MIT"], "categories": ["net"],
+            "flatsize": pkg_size, "desc": desc, "sum": pkg_sha,
+            "repopath": f"All/{fname}", "pkgsize": pkg_size,
+        })
         print(f"[repo]   + {fname}")
 
-    # One JSON object per line (pkg catalog format)
     yaml_lines = "\n".join(json.dumps(e, separators=(',', ':')) for e in entries) + "\n"
     yaml_bytes = yaml_lines.encode("utf-8")
-
-    yaml_path = os.path.join(DOCS_DIR, "packagesite.yaml")
-    with open(yaml_path, "wb") as f:
+    with open(os.path.join(DOCS_DIR, "packagesite.yaml"), "wb") as f:
         f.write(yaml_bytes)
     print(f"[repo] packagesite.yaml  ({len(yaml_bytes):,} bytes, {len(entries)} packages)")
 
-    # Sign with double-hash scheme
-    print("[repo] Signing catalog (double-hash pkeyutl) ...")
+    # Sign
+    print("[repo] Signing catalog ...")
     sig_bytes = sign_yaml(yaml_bytes)
-    with open(PUBLIC_KEY, "rb") as f:
-        pub_bytes = f.read()
 
-    # Build packagesite.pkg
+    # packagesite.pkg — PUBKEY mode: only yaml + sig (NO .pub embedded)
     site_buf = io.BytesIO()
     with tarfile.open(fileobj=site_buf, mode="w:xz") as tf:
-        tar_add(tf, "packagesite.yaml",   yaml_bytes)
-        tar_add(tf, f"{SIGN_NAME}.sig",   sig_bytes)
-        tar_add(tf, f"{SIGN_NAME}.pub",   pub_bytes)
-
+        tar_add(tf, "packagesite.yaml",  yaml_bytes)
+        tar_add(tf, f"{SIGN_NAME}.sig",  sig_bytes)
     site_bytes = site_buf.getvalue()
     with open(os.path.join(DOCS_DIR, "packagesite.pkg"), "wb") as f:
         f.write(site_bytes)
     print(f"[repo] packagesite.pkg   ({len(site_bytes):,} bytes)")
 
-    # meta.conf — no signature_type field here so pkg reads it from .conf file
+    # Read public key PEM for embedding in meta.conf
+    with open(PUBLIC_KEY, "r") as f:
+        pub_pem = f.read().strip()
+    # Escape newlines for JSON string embedding
+    pub_pem_escaped = pub_pem.replace("\n", "\\n")
+
+    # meta.conf — PUBKEY mode: embed public key inline
     meta = (
         '{\n'
         '  "version": 2,\n'
@@ -279,54 +235,62 @@ def build_catalog():
         '  "filesite_archive": "filesite",\n'
         '  "digests": "digests.txz",\n'
         '  "digests_archive": "digests",\n'
-        '  "signature_type": "FINGERPRINTS"\n'
+        '  "signature_type": "PUBKEY",\n'
+        f'  "pubkey": "{pub_pem_escaped}"\n'
         '}\n'
     )
     for mname in ("meta.conf", "meta"):
         with open(os.path.join(DOCS_DIR, mname), "w") as f:
             f.write(meta)
+    print(f"[repo] meta.conf written (PUBKEY mode, {len(meta)} bytes)")
 
-    # digests.txz — empty placeholder
+    # digests.txz placeholder
     dig_buf = io.BytesIO()
     with tarfile.open(fileobj=dig_buf, mode="w:xz"):
         pass
     with open(os.path.join(DOCS_DIR, "digests.txz"), "wb") as f:
         f.write(dig_buf.getvalue())
 
-    fingerprint = compute_fingerprint()
-    print(f"[repo] Fingerprint: {fingerprint}")
-    return fingerprint
+    # Also save standalone pub key file for clients that want to download it
+    with open(os.path.join(DOCS_DIR, "custompf.pub"), "w") as f:
+        f.write(pub_pem + "\n")
+
+    return pub_pem
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     os.makedirs(ALL_DIR, exist_ok=True)
 
-    # 1. Build OVP package
     build_ovp_pkg()
+    pub_pem = build_catalog()
 
-    # 2. Rebuild full catalog with correct signing
-    fingerprint = build_catalog()
-
-    # 3. Update custompf/keys/ with new public key and fingerprint
+    # Update keys/ directory
     keys_dest = os.path.join(REPO_ROOT, "keys")
     os.makedirs(keys_dest, exist_ok=True)
-
     with open(PUBLIC_KEY, "rb") as f:
         pub_bytes = f.read()
     with open(os.path.join(keys_dest, "custompf.pub"), "wb") as f:
         f.write(pub_bytes)
-
-    fp_content = f"function: sha256\nfingerprint: {fingerprint}\n"
+    # Keep fingerprint file for reference (not required for PUBKEY mode)
+    fp = hashlib.sha256(pub_bytes).hexdigest()
     with open(os.path.join(keys_dest, "custompf.fingerprint"), "w") as f:
-        f.write(fp_content)
+        f.write(f"function: sha256\nfingerprint: {fp}\n")
 
     print()
     print("=" * 60)
-    print("BUILD COMPLETE")
+    print("BUILD COMPLETE — PUBKEY mode")
     print("=" * 60)
-    print(f"  Fingerprint : {fingerprint}")
-    print(f"  Packages    : {len([f for f in os.listdir(ALL_DIR) if f.endswith('.pkg')])} in docs/All/")
+    print(f"  Packages: {len([f for f in os.listdir(ALL_DIR) if f.endswith('.pkg')])} in docs/All/")
+    print()
+    print("Client custompf.conf:")
+    print('  custompf: {')
+    print('    url: "https://SomeoneCares.github.io/custompf/",')
+    print('    signature_type: "PUBKEY",')
+    print('    pubkey: "/usr/local/etc/pkg/custompf.pub",')
+    print('    enabled: yes,')
+    print('    priority: 10')
+    print('  }')
     print()
 
 if __name__ == "__main__":
