@@ -97,11 +97,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 					$existing_certref = $conflicts['cert']['refid'];
 				}
 
+				// Use confirmed credentials from preview form if provided, else fall back to state
+				$final_username = (isset($_POST['ovp_username_confirm']) && $_POST['ovp_username_confirm'] !== '')
+					? trim($_POST['ovp_username_confirm'])
+					: (isset($ovp_state['username']) ? $ovp_state['username'] : '');
+				$final_password = (isset($_POST['ovp_password_confirm']) && $_POST['ovp_password_confirm'] !== '')
+					? trim($_POST['ovp_password_confirm'])
+					: (isset($ovp_state['password']) ? $ovp_state['password'] : '');
+
 				$options = array(
 					'description'      => isset($ovp_state['description']) ? $ovp_state['description'] : '',
 					'interface'        => isset($ovp_state['interface'])   ? $ovp_state['interface']   : 'wan',
-					'username'         => isset($ovp_state['username'])    ? $ovp_state['username']    : '',
-					'password'         => isset($ovp_state['password'])    ? $ovp_state['password']    : '',
+					'username'         => $final_username,
+					'password'         => $final_password,
 					'import_ca'        => $import_ca,
 					'import_cert'      => $import_cert,
 					'import_client'    => $import_client,
@@ -465,6 +473,37 @@ include("head.inc");
               </table>
             </div>
           </div>
+
+          <?php if (isset($d['auth-user-pass'])): ?>
+          <div class="panel panel-info">
+            <div class="panel-heading">
+              <h2 class="panel-title">
+                <span class="fa fa-key"></span>
+                <?= gettext("VPN Credentials") ?>
+              </h2>
+            </div>
+            <div class="panel-body">
+              <p class="text-muted"><?= gettext("This VPN requires a username and password. Enter them below before applying.") ?></p>
+              <div class="form-horizontal">
+                <div class="form-group">
+                  <label class="col-sm-2 control-label"><?= gettext("Username") ?></label>
+                  <div class="col-sm-4">
+                    <input type="text" name="ovp_username_confirm" class="form-control"
+                           value="<?= htmlspecialchars(isset($ovp_state['username']) ? $ovp_state['username'] : '', ENT_QUOTES, 'UTF-8') ?>" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label"><?= gettext("Password") ?></label>
+                  <div class="col-sm-4">
+                    <input type="password" name="ovp_password_confirm" class="form-control"
+                           autocomplete="new-password" />
+                    <span class="help-block"><?= gettext("Re-enter your VPN password.") ?></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <?php endif; ?>
 
           <div class="panel panel-default">
             <div class="panel-body">
