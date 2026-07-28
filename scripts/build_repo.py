@@ -24,7 +24,7 @@ ALL_DIR    = os.path.join(DOCS_DIR, "All")
 
 # ── OVP package metadata ─────────────────────────────────────────────────────
 OVP_NAME    = "pfSense-pkg-ovp"
-OVP_VERSION = "1.1.3"
+OVP_VERSION = "1.1.4"
 OVP_ORIGIN  = "net/pfSense-pkg-ovp"
 OVP_COMMENT = "OpenVPN Client Importer for pfSense 2.8"
 OVP_DESC    = ("Upload a .ovpn file to automatically create a fully configured "
@@ -79,9 +79,13 @@ def build_ovp_pkg():
         flatsize += len(data)
         print(f"[ovp]   {dest_abs}  ({len(data):,} B)")
 
+    # Manifest files: section must use the SAME path as tar member names
+    # tar members are stored WITHOUT leading slash: usr/local/pkg/foo.xml
+    # so manifest must also use:                   usr/local/pkg/foo.xml
     files_ucl = ""
     for dest_abs, data in file_entries:
-        files_ucl += f'  "{dest_abs}": "{pkg_sum(data)}"\n'
+        tar_name = dest_abs.lstrip('/')
+        files_ucl += f'  "{tar_name}": "{pkg_sum(data)}"\n'
 
     manifest_str = textwrap.dedent(f"""\
         name: "{OVP_NAME}"
