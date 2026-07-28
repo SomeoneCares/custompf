@@ -24,7 +24,7 @@ ALL_DIR    = os.path.join(DOCS_DIR, "All")
 
 # ── OVP package metadata ─────────────────────────────────────────────────────
 OVP_NAME    = "pfSense-pkg-ovp"
-OVP_VERSION = "1.1.2"
+OVP_VERSION = "1.1.3"
 OVP_ORIGIN  = "net/pfSense-pkg-ovp"
 OVP_COMMENT = "OpenVPN Client Importer for pfSense 2.8"
 OVP_DESC    = ("Upload a .ovpn file to automatically create a fully configured "
@@ -118,16 +118,32 @@ def build_ovp_pkg():
         "${PKG_ROOTDIR}/etc/rc.packages pfSense-pkg-ovp ${2}\n"
     ).encode()
 
+    # Collect unique directories needed
+    dirs_needed = set()
+    for dest_abs, _ in file_entries:
+        parts = dest_abs.lstrip('/').split('/')
+        for i in range(1, len(parts)):
+            dirs_needed.add('/'.join(parts[:i]))
+    dirs_needed = sorted(dirs_needed)
+
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:xz") as tf:
         tar_add(tf, "+MANIFEST",         manifest_str)
         tar_add(tf, "+COMPACT_MANIFEST", manifest_str)
         tar_add(tf, "+INSTALL",          install_script,   mode=0o755)
         tar_add(tf, "+DEINSTALL",        deinstall_script, mode=0o755)
+        # Add directory entries first so pkg can create them
+        for d in dirs_needed:
+            ti = tarfile.TarInfo(name=d)
+            ti.type  = tarfile.DIRTYPE
+            ti.mode  = 0o755
+            ti.mtime = int(time.time())
+            ti.size  = 0
+            tf.addfile(ti)
         for dest_abs, data in file_entries:
-            # Tar member name MUST match manifest files: section exactly
-            # manifest uses /usr/local/... so tar member must also use /usr/local/...
-            tar_add(tf, dest_abs, data)
+            # Store WITHOUT leading slash — pkg's RELATIVE_PATH strips it anyway
+            # and some pkg versions skip members with leading slash entirely
+            tar_add(tf, dest_abs.lstrip('/'), data)
 
     pkg_bytes = buf.getvalue()
     pkg_path  = os.path.join(ALL_DIR, f"{OVP_NAME}-{OVP_VERSION}.pkg")
