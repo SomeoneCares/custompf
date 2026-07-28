@@ -27,3 +27,7 @@ distfiles/
 tmp/
 temp/
 *.tmp
+
+# Private signing key — NEVER commit this
+keys/repo.key
+custompf-keys/

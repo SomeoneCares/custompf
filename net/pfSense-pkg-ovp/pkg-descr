@@ -1,0 +1,15 @@
+pfSense OpenVPN Client Importer (OVP)
+
+This package adds a web UI page to pfSense 2.8 that allows administrators to
+import standard OpenVPN .ovpn configuration files directly from the browser.
+
+Features:
+  - Upload and parse .ovpn files (unified inline format)
+  - Automatically extract and import CA certificates, client certificates,
+    client keys, and TLS authentication keys into the pfSense Certificate Manager
+  - Map all common OpenVPN directives to pfSense OpenVPN client fields
+  - Support for TLS-auth, TLS-crypt, cipher, auth digest, compression, and more
+  - Preview parsed configuration before applying
+  - Activates the new VPN client immediately without requiring a reboot
+
+WWW: https://github.com/SomeoneCares/pFSense-OVP

@@ -1,11 +1,6 @@
-{
-  "version": 2,
-  "packing_format": "txz",
-  "manifests": "packagesite.yaml",
-  "manifests_archive": "packagesite",
-  "filesite": "filesite.yaml",
-  "filesite_archive": "filesite",
-  "digests": "digests.txz",
-  "digests_archive": "digests",
-  "signature_type": "FINGERPRINTS"
-}
+version: 2
+packing_format: "txz"
+manifests_archive: "packagesite"
+digests_archive: "digests"
+signature_type: "FINGERPRINTS"
+fingerprints: "/usr/local/etc/pkg/fingerprints/custompf"
