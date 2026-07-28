@@ -1,31 +1,26 @@
 #!/usr/bin/env python3
 """
 build_custompf_repo.py
-Rebuild the full custompf repository using PUBKEY signature mode.
+Rebuild the full custompf repository — signature_type: NONE.
 
-PUBKEY mode (matches original working custompf repo):
-  - meta.conf embeds the full PEM public key inline
-  - packagesite.pkg contains: packagesite.yaml + custompf.sig
-  - Signature = RSA-SHA256 of sha256hex(yaml).encode()  via pkeyutl
-  - NO fingerprint files needed on pfSense clients
-  - Client .conf uses: signature_type: "PUBKEY", pubkey: "/path/to/repo.pub"
+This matches the original working custompf build exactly:
+  - packagesite.pkg contains only packagesite.yaml (no signature)
+  - meta.conf uses signature_type: "NONE"
+  - Client .conf uses: signature_type: "NONE"
+  - No keys, no fingerprints, no signing required
 
 TAR MEMBER PATHS (custompf convention):
   - Regular files WITHOUT leading slash: usr/local/pkg/foo.xml
   - Manifest files: section WITH leading slash: /usr/local/pkg/foo.xml
 """
 
-import hashlib, io, json, os, subprocess, sys, tarfile, textwrap, time
+import hashlib, io, json, os, tarfile, textwrap, time
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-REPO_ROOT   = "/home/ubuntu/custompf"
-OVP_SOURCE  = "/home/ubuntu/pFSense-OVP/pfSense-pkg-ovp/files"
-KEYS_DIR    = "/home/ubuntu/custompf-keys"
-PRIVATE_KEY = os.path.join(KEYS_DIR, "repo.key")
-PUBLIC_KEY  = os.path.join(KEYS_DIR, "repo.pub")
-DOCS_DIR    = os.path.join(REPO_ROOT, "docs")
-ALL_DIR     = os.path.join(DOCS_DIR, "All")
-SIGN_NAME   = "custompf"
+REPO_ROOT  = "/home/ubuntu/custompf"
+OVP_SOURCE = "/home/ubuntu/pFSense-OVP/pfSense-pkg-ovp/files"
+DOCS_DIR   = os.path.join(REPO_ROOT, "docs")
+ALL_DIR    = os.path.join(DOCS_DIR, "All")
 
 # ── OVP package metadata ─────────────────────────────────────────────────────
 OVP_NAME    = "pfSense-pkg-ovp"
@@ -67,34 +62,6 @@ def tar_add(tf, name, data, mode=0o644):
     ti.mode  = mode
     ti.mtime = int(time.time())
     tf.addfile(ti, io.BytesIO(data))
-
-def sign_yaml(yaml_bytes):
-    """
-    Sign using double-hash pkeyutl (matches original custompf build):
-      hex_hash    = sha256hex(yaml_bytes)
-      double_hash = sha256(hex_hash.encode()).digest()
-      signature   = pkeyutl -sign -inkey repo.key -pkeyopt digest:sha256
-    """
-    hex_hash    = sha256hex(yaml_bytes)
-    double_hash = hashlib.sha256(hex_hash.encode()).digest()
-
-    dh_file  = os.path.join(KEYS_DIR, "double_hash.bin")
-    sig_file = os.path.join(KEYS_DIR, f"{SIGN_NAME}.sig")
-
-    with open(dh_file, "wb") as f:
-        f.write(double_hash)
-
-    result = subprocess.run(
-        ["openssl", "pkeyutl", "-sign", "-inkey", PRIVATE_KEY,
-         "-in", dh_file, "-out", sig_file, "-pkeyopt", "digest:sha256"],
-        capture_output=True
-    )
-    if result.returncode != 0:
-        print("Sign failed:", result.stderr.decode(), file=sys.stderr)
-        sys.exit(1)
-
-    with open(sig_file, "rb") as f:
-        return f.read()
 
 # ── Build OVP .pkg ───────────────────────────────────────────────────────────
 
@@ -165,8 +132,8 @@ def build_ovp_pkg():
     with open(pkg_path, "wb") as f:
         f.write(pkg_bytes)
 
-    print(f"[ovp] Written: {pkg_path}  ({len(pkg_bytes):,} bytes)")
-    return pkg_path, pkg_bytes, flatsize
+    print(f"[ovp] Written: {pkg_path}  ({len(pkg_bytes):,} bytes, flatsize={flatsize:,})")
+    return pkg_bytes
 
 # ── Build repo catalog ───────────────────────────────────────────────────────
 
@@ -198,51 +165,39 @@ def build_catalog():
         })
         print(f"[repo]   + {fname}")
 
-    yaml_lines = "\n".join(json.dumps(e, separators=(',', ':')) for e in entries) + "\n"
-    yaml_bytes = yaml_lines.encode("utf-8")
+    yaml_str   = "\n".join(json.dumps(e, separators=(',', ':')) for e in entries) + "\n"
+    yaml_bytes = yaml_str.encode("utf-8")
+
     with open(os.path.join(DOCS_DIR, "packagesite.yaml"), "wb") as f:
         f.write(yaml_bytes)
     print(f"[repo] packagesite.yaml  ({len(yaml_bytes):,} bytes, {len(entries)} packages)")
 
-    # Sign
-    print("[repo] Signing catalog ...")
-    sig_bytes = sign_yaml(yaml_bytes)
-
-    # packagesite.pkg — PUBKEY mode: only yaml + sig (NO .pub embedded)
+    # packagesite.pkg — yaml only, no signature (signature_type: NONE)
     site_buf = io.BytesIO()
     with tarfile.open(fileobj=site_buf, mode="w:xz") as tf:
-        tar_add(tf, "packagesite.yaml",  yaml_bytes)
-        tar_add(tf, f"{SIGN_NAME}.sig",  sig_bytes)
+        tar_add(tf, "packagesite.yaml", yaml_bytes)
     site_bytes = site_buf.getvalue()
     with open(os.path.join(DOCS_DIR, "packagesite.pkg"), "wb") as f:
         f.write(site_bytes)
     print(f"[repo] packagesite.pkg   ({len(site_bytes):,} bytes)")
 
-    # Read public key PEM for embedding in meta.conf
-    with open(PUBLIC_KEY, "r") as f:
-        pub_pem = f.read().strip()
-    # Escape newlines for JSON string embedding
-    pub_pem_escaped = pub_pem.replace("\n", "\\n")
+    # meta.conf — signature_type: NONE (matches original working build)
+    meta = json.dumps({
+        "version": 2,
+        "packing_format": "txz",
+        "manifests": "packagesite.yaml",
+        "manifests_archive": "packagesite",
+        "filesite": "filesite.yaml",
+        "filesite_archive": "filesite",
+        "digests": "digests.txz",
+        "digests_archive": "digests",
+        "signature_type": "NONE"
+    }, indent=2) + "\n"
 
-    # meta.conf — PUBKEY mode: embed public key inline
-    meta = (
-        '{\n'
-        '  "version": 2,\n'
-        '  "packing_format": "txz",\n'
-        '  "manifests": "packagesite.yaml",\n'
-        '  "manifests_archive": "packagesite",\n'
-        '  "filesite": "filesite.yaml",\n'
-        '  "filesite_archive": "filesite",\n'
-        '  "digests": "digests.txz",\n'
-        '  "digests_archive": "digests",\n'
-        '  "signature_type": "PUBKEY",\n'
-        f'  "pubkey": "{pub_pem_escaped}"\n'
-        '}\n'
-    )
     for mname in ("meta.conf", "meta"):
         with open(os.path.join(DOCS_DIR, mname), "w") as f:
             f.write(meta)
-    print(f"[repo] meta.conf written (PUBKEY mode, {len(meta)} bytes)")
+    print(f"[repo] meta.conf written (signature_type: NONE)")
 
     # digests.txz placeholder
     dig_buf = io.BytesIO()
@@ -251,43 +206,23 @@ def build_catalog():
     with open(os.path.join(DOCS_DIR, "digests.txz"), "wb") as f:
         f.write(dig_buf.getvalue())
 
-    # Also save standalone pub key file for clients that want to download it
-    with open(os.path.join(DOCS_DIR, "custompf.pub"), "w") as f:
-        f.write(pub_pem + "\n")
-
-    return pub_pem
-
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     os.makedirs(ALL_DIR, exist_ok=True)
-
     build_ovp_pkg()
-    pub_pem = build_catalog()
-
-    # Update keys/ directory
-    keys_dest = os.path.join(REPO_ROOT, "keys")
-    os.makedirs(keys_dest, exist_ok=True)
-    with open(PUBLIC_KEY, "rb") as f:
-        pub_bytes = f.read()
-    with open(os.path.join(keys_dest, "custompf.pub"), "wb") as f:
-        f.write(pub_bytes)
-    # Keep fingerprint file for reference (not required for PUBKEY mode)
-    fp = hashlib.sha256(pub_bytes).hexdigest()
-    with open(os.path.join(keys_dest, "custompf.fingerprint"), "w") as f:
-        f.write(f"function: sha256\nfingerprint: {fp}\n")
+    build_catalog()
 
     print()
     print("=" * 60)
-    print("BUILD COMPLETE — PUBKEY mode")
+    print("BUILD COMPLETE")
     print("=" * 60)
     print(f"  Packages: {len([f for f in os.listdir(ALL_DIR) if f.endswith('.pkg')])} in docs/All/")
     print()
-    print("Client custompf.conf:")
+    print("Client custompf.conf (no keys needed):")
     print('  custompf: {')
     print('    url: "https://SomeoneCares.github.io/custompf/",')
-    print('    signature_type: "PUBKEY",')
-    print('    pubkey: "/usr/local/etc/pkg/custompf.pub",')
+    print('    signature_type: "NONE",')
     print('    enabled: yes,')
     print('    priority: 10')
     print('  }')
