@@ -447,10 +447,13 @@ function ovp_map_digest($auth) {
 function ovp_map_compression($directives) {
 	if (isset($directives['comp-lzo'])) {
 		$val = $directives['comp-lzo'];
-		if ($val === 'no') {
-			return 'noadapt';
+		if ($val === 'no' || $val === 'false') {
+			return '';  // comp-lzo no = disabled, pfSense field empty
 		}
-		return 'lzo';
+		if ($val === 'adaptive' || $val === true) {
+			return 'adaptive';
+		}
+		return 'lzo';  // comp-lzo yes
 	}
 	if (isset($directives['compress'])) {
 		$val = strtolower(trim($directives['compress']));
@@ -681,6 +684,42 @@ function ovp_import_config($parsed, $options = []) {
 	$digest      = !empty($directives['auth'])    ? ovp_map_digest($directives['auth'])     : 'SHA256';
 	$compression = ovp_map_compression($directives);
 
+	// ---- MTU / fragment / mssfix ----
+	$tunnel_mtu      = isset($directives['tun-mtu'])   ? (string)(int)$directives['tun-mtu']   : '';
+	$tunnel_fragment = isset($directives['fragment'])  ? (string)(int)$directives['fragment']  : '';
+	$mssfix          = isset($directives['mssfix'])    ? (string)(int)$directives['mssfix']    : '';
+
+	// ---- Auth mode (auth-user-pass) ----
+	// When auth-user-pass is present pfSense needs authmode set to 'auth'
+	$authmode = isset($directives['auth-user-pass']) ? 'auth' : '';
+
+	// ---- Extra flags ----
+	$fast_io       = isset($directives['fast-io'])       ? true : '';
+	$pull          = isset($directives['pull'])          ? true : '';
+	$remote_random = isset($directives['remote-random']) ? true : '';
+
+	// ---- Collect unmapped directives into custom_options ----
+	$custom_opts_map = [
+		'sndbuf'        => 'sndbuf',
+		'rcvbuf'        => 'rcvbuf',
+		'route-method'  => 'route-method',
+		'route-delay'   => 'route-delay',
+		'ns-cert-type'  => 'ns-cert-type',
+		'verify-x509-name' => 'verify-x509-name',
+	];
+	$custom_options_parts = [];
+	foreach ($custom_opts_map as $key => $opt_name) {
+		if (isset($directives[$key])) {
+			$val = $directives[$key];
+			if ($val === true) {
+				$custom_options_parts[] = $opt_name;
+			} else {
+				$custom_options_parts[] = $opt_name . ' ' . $val;
+			}
+		}
+	}
+	$custom_options = implode(';', $custom_options_parts);
+
 	// ---- TLS ----
 	$tls_key       = '';
 	$tls_type      = '';
@@ -753,7 +792,6 @@ function ovp_import_config($parsed, $options = []) {
 
 		$new_client = [
 			'vpnid'               => (string)$vpnid,
-			'disable'             => '',
 			'mode'                => 'p2p_tls',
 			'protocol'            => $protocol,
 			'dev_mode'            => $dev_mode,
@@ -794,8 +832,14 @@ function ovp_import_config($parsed, $options = []) {
 			'serverbridge_dhcp_end'   => '',
 			'username'            => $username,
 			'password'            => $password,
-			'authmode'            => '',
+			'authmode'            => $authmode,
 			'softfloat'           => '',
+			'fast_io'             => $fast_io,
+			'pull'                => $pull,
+			'remote_random'       => $remote_random,
+			'tunnel_mtu'          => $tunnel_mtu,
+			'tunnel_fragment'     => $tunnel_fragment,
+			'mssfix'              => $mssfix,
 			'ping_method'         => 'keepalive',
 			'keepalive_interval'  => $keepalive_interval,
 			'keepalive_timeout'   => $keepalive_timeout,
@@ -822,7 +866,7 @@ function ovp_import_config($parsed, $options = []) {
 			'persist_tun'         => $persist_tun,
 			'remote_cert_tls'     => $remote_cert_tls,
 			'resolv_retry'        => $resolv_retry,
-			'custom_options'      => '',
+			'custom_options'      => $custom_options,
 		];
 
 		config_set_path('openvpn/openvpn-client/', $new_client);

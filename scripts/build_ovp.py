@@ -24,7 +24,7 @@ ALL_DIR    = os.path.join(DOCS_DIR, "All")
 
 # ── OVP package metadata ─────────────────────────────────────────────────────
 OVP_NAME    = "pfSense-pkg-ovp"
-OVP_VERSION = "1.1.8"
+OVP_VERSION = "1.1.9"
 OVP_ORIGIN  = "net/pfSense-pkg-ovp"
 OVP_COMMENT = "OpenVPN Client Importer for pfSense 2.8"
 OVP_DESC    = ("Upload a .ovpn file to automatically create a fully configured "
