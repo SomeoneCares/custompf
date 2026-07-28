@@ -24,7 +24,7 @@ ALL_DIR    = os.path.join(DOCS_DIR, "All")
 
 # ── OVP package metadata ─────────────────────────────────────────────────────
 OVP_NAME    = "pfSense-pkg-ovp"
-OVP_VERSION = "1.1.4"
+OVP_VERSION = "1.1.5"
 OVP_ORIGIN  = "net/pfSense-pkg-ovp"
 OVP_COMMENT = "OpenVPN Client Importer for pfSense 2.8"
 OVP_DESC    = ("Upload a .ovpn file to automatically create a fully configured "
@@ -79,13 +79,11 @@ def build_ovp_pkg():
         flatsize += len(data)
         print(f"[ovp]   {dest_abs}  ({len(data):,} B)")
 
-    # Manifest files: section must use the SAME path as tar member names
-    # tar members are stored WITHOUT leading slash: usr/local/pkg/foo.xml
-    # so manifest must also use:                   usr/local/pkg/foo.xml
+    # Manifest files: section uses absolute paths WITH leading slash
+    # This matches the working flexiwan 1.0.6 format exactly
     files_ucl = ""
     for dest_abs, data in file_entries:
-        tar_name = dest_abs.lstrip('/')
-        files_ucl += f'  "{tar_name}": "{pkg_sum(data)}"\n'
+        files_ucl += f'  "{dest_abs}": "{pkg_sum(data)}"\n'
 
     manifest_str = textwrap.dedent(f"""\
         name: "{OVP_NAME}"
@@ -122,32 +120,16 @@ def build_ovp_pkg():
         "${PKG_ROOTDIR}/etc/rc.packages pfSense-pkg-ovp ${2}\n"
     ).encode()
 
-    # Collect unique directories needed
-    dirs_needed = set()
-    for dest_abs, _ in file_entries:
-        parts = dest_abs.lstrip('/').split('/')
-        for i in range(1, len(parts)):
-            dirs_needed.add('/'.join(parts[:i]))
-    dirs_needed = sorted(dirs_needed)
-
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:xz") as tf:
         tar_add(tf, "+MANIFEST",         manifest_str)
         tar_add(tf, "+COMPACT_MANIFEST", manifest_str)
         tar_add(tf, "+INSTALL",          install_script,   mode=0o755)
         tar_add(tf, "+DEINSTALL",        deinstall_script, mode=0o755)
-        # Add directory entries first so pkg can create them
-        for d in dirs_needed:
-            ti = tarfile.TarInfo(name=d)
-            ti.type  = tarfile.DIRTYPE
-            ti.mode  = 0o755
-            ti.mtime = int(time.time())
-            ti.size  = 0
-            tf.addfile(ti)
+        # Files stored WITH leading slash — matches working flexiwan 1.0.6 format
+        # No directory entries needed (flexiwan 1.0.6 has none and works)
         for dest_abs, data in file_entries:
-            # Store WITHOUT leading slash — pkg's RELATIVE_PATH strips it anyway
-            # and some pkg versions skip members with leading slash entirely
-            tar_add(tf, dest_abs.lstrip('/'), data)
+            tar_add(tf, dest_abs, data)
 
     pkg_bytes = buf.getvalue()
     pkg_path  = os.path.join(ALL_DIR, f"{OVP_NAME}-{OVP_VERSION}.pkg")
