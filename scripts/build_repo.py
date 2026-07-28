@@ -125,7 +125,9 @@ def build_ovp_pkg():
         tar_add(tf, "+INSTALL",          install_script,   mode=0o755)
         tar_add(tf, "+DEINSTALL",        deinstall_script, mode=0o755)
         for dest_abs, data in file_entries:
-            tar_add(tf, dest_abs.lstrip("/"), data)
+            # Tar member name MUST match manifest files: section exactly
+            # manifest uses /usr/local/... so tar member must also use /usr/local/...
+            tar_add(tf, dest_abs, data)
 
     pkg_bytes = buf.getvalue()
     pkg_path  = os.path.join(ALL_DIR, f"{OVP_NAME}-{OVP_VERSION}.pkg")
